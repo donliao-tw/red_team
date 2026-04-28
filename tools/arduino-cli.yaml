@@ -1,0 +1,15 @@
+directories:
+  data: c:/Users/donli/workspace/red_team/tools/arduino15
+  downloads: c:/Users/donli/workspace/red_team/tools/arduino15/staging
+  user: c:/Users/donli/workspace/red_team/tools/arduino-user
+library:
+  enable_unsafe_install: false
+logging:
+  format: text
+  level: info
+output:
+  no_color: false
+sketch:
+  always_export_binaries: false
+updater:
+  enable_notification: false
