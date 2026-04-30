@@ -108,6 +108,8 @@ class FunctionButton(QtWidgets.QPushButton):
 
     DEFAULT_CHECKED_COLOR = "#d97706"
 
+    colorChanged = QtCore.Signal(str)
+
     def __init__(self, icon: str, tooltip: str) -> None:
         super().__init__(icon)
         self.setObjectName("funcMain")
@@ -121,23 +123,35 @@ class FunctionButton(QtWidgets.QPushButton):
         initial = QtGui.QColor(self._checked_color)
         color = QtWidgets.QColorDialog.getColor(initial, self, "選擇啟動色")
         if color.isValid():
-            self._checked_color = color.name()
-            self._apply_checked_color()
+            self.set_checked_color(color.name())
             event.accept()
 
+    def set_checked_color(self, color: str) -> None:
+        if color == self._checked_color:
+            return
+        self._checked_color = color
+        self._apply_checked_color()
+        self.colorChanged.emit(color)
+
     def _apply_checked_color(self) -> None:
-        c = self._checked_color
-        # Per-instance stylesheet — overrides the global :checked rule for
-        # this button only. Other state styling (size, padding, hover when
-        # unchecked) still comes from the application stylesheet.
+        base = QtGui.QColor(self._checked_color)
+        top = base.lighter(135).name()
+        mid = base.name()
+        bottom = base.darker(140).name()
+        edge = base.darker(170).name()
+        sheen = base.lighter(155).name()
+
         self.setStyleSheet(f"""
             QPushButton#funcMain:checked {{
-                background-color: {c};
-                border: 1px solid {c};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {top}, stop:0.45 {mid}, stop:1 {bottom});
+                border: 1px solid {edge};
+                border-top: 1px solid {sheen};
                 color: white;
             }}
             QPushButton#funcMain:checked:hover {{
-                background-color: {c};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {sheen}, stop:0.45 {top}, stop:1 {mid});
             }}
         """)
 
@@ -224,15 +238,34 @@ class MainWindow(QtWidgets.QMainWindow):
         # primary mode, so it makes sense to start enabled.
         self.btn_protect.setChecked(True)
 
+        # Bind 機器人(掛機) ↔ 娃娃 active colour: changing one updates the other.
+        # 保護 keeps its own colour independently. The set_checked_color guard
+        # against same-value no-ops prevents the ping-pong from looping.
+        self.btn_afk.colorChanged.connect(self.btn_doll.set_checked_color)
+        self.btn_doll.colorChanged.connect(self.btn_afk.set_checked_color)
+
     # ------------------------------------------------------------------ rows
 
     def _build_login_row(self) -> QtWidgets.QHBoxLayout:
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(6)
 
-        self.unlock_btn = QtWidgets.QPushButton("解除鎖定")
-        self.unlock_btn.setObjectName("secondary")
+        self.unlock_btn = QtWidgets.QPushButton("\U0001F513")  # 🔓 open padlock
+        self.unlock_btn.setObjectName("iconBtn")
+        self.unlock_btn.setFixedSize(38, 34)
+        self.unlock_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.unlock_btn.setToolTip("解除鎖定")
+        self.unlock_btn.setStyleSheet("font-size: 14pt;")
         row.addWidget(self.unlock_btn)
+
+        self.skill_settings_btn = QtWidgets.QPushButton("⚙")
+        self.skill_settings_btn.setObjectName("iconBtn")
+        self.skill_settings_btn.setFixedSize(38, 34)
+        self.skill_settings_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.skill_settings_btn.setToolTip("技能設定")
+        self.skill_settings_btn.setStyleSheet("font-size: 14pt;")
+        self.skill_settings_btn.clicked.connect(lambda: self._open_settings("skill"))
+        row.addWidget(self.skill_settings_btn)
 
         self.login_combo = QtWidgets.QComboBox()
         self.login_combo.addItems([
@@ -242,7 +275,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.refresh_btn = QtWidgets.QPushButton("↻")
         self.refresh_btn.setObjectName("iconBtn")
-        self.refresh_btn.setFixedWidth(32)
+        self.refresh_btn.setFixedSize(38, 34)
+        self.refresh_btn.setStyleSheet("font-size: 14pt;")
+        self.refresh_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.refresh_btn.setToolTip("重新整理")
         row.addWidget(self.refresh_btn)
 
         return row

@@ -258,8 +258,14 @@ QLabel#status {{ color: {c['text_secondary']}; font-size: {10 + d}pt; }}
 QLabel#pageTitle {{ font-size: {22 + d}pt; font-weight: bold; }}
 QLabel#pageSubtitle {{ color: {c['text_secondary']}; font-size: {11 + d}pt; }}
 
-/* Cards / sub-panels */
-QFrame#card {{ background-color: {c['bg_card']}; border-radius: 10px; }}
+/* Cards / sub-panels — subtle top-down sheen for depth. */
+QFrame#card {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #313131, stop:1 #272727);
+    border: 1px solid #383838;
+    border-top: 1px solid #404040;
+    border-radius: 10px;
+}}
 QFrame#subpanel {{ background-color: {c['bg_subpanel']}; border-radius: 8px; }}
 
 /* Dashboard cards on the main page */
@@ -300,11 +306,22 @@ QPushButton:disabled {{ background-color: {c['border_light']}; color: {c['text_t
 QPushButton#destructive {{ background-color: {c['destructive']}; }}
 QPushButton#destructive:hover {{ background-color: {c['destructive_hover']}; }}
 QPushButton#secondary {{
-    background-color: transparent;
-    border: 1px solid {c['border_light']};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #3a3a3a, stop:1 #2a2a2a);
+    border: 1px solid #1f1f1f;
+    border-top: 1px solid #4a4a4a;
     color: {c['text_primary']};
+    border-radius: 4px;
 }}
-QPushButton#secondary:hover {{ background-color: {c['secondary_hover']}; }}
+QPushButton#secondary:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #464646, stop:1 #353535);
+    border-top: 1px solid #5a5a5a;
+}}
+QPushButton#secondary:pressed {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #252525, stop:1 #353535);
+}}
 QPushButton#help {{
     background-color: {c['help_bg']};
     color: {c['text_secondary']};
@@ -457,11 +474,13 @@ QScrollBar::handle:horizontal {{
 
 /* ─── Compact main panel ─── */
 
-/* Function row — compact dark-grey pill toggles + shared gear. */
+/* Function row — brushed-metal pill toggles + matching gear. */
 QFrame#funcRow {{ background-color: transparent; }}
 QPushButton#funcMain {{
-    background-color: #3a3f4a;
-    border: 1px solid #4d525d;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #4a505d, stop:0.5 #3a3f4a, stop:1 #2c303a);
+    border: 1px solid #2a2e36;
+    border-top: 1px solid #5a6172;
     color: {c['text_primary']};
     font-size: {14 + d}pt;
     border-radius: 5px;
@@ -469,45 +488,85 @@ QPushButton#funcMain {{
     text-align: center;
     min-height: 40px;
 }}
-QPushButton#funcMain:hover {{ background-color: #454a55; }}
+QPushButton#funcMain:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #565d6c, stop:0.5 #454a57, stop:1 #353a44);
+    border-top: 1px solid #6a7384;
+}}
+QPushButton#funcMain:pressed {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #2c303a, stop:1 #3a3f4a);
+    border-top: 1px solid #2a2e36;
+}}
 QPushButton#funcMain:checked {{
-    background-color: #d97706;
-    border: 1px solid #d97706;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f59836, stop:0.45 #d97706, stop:1 #a35c04);
+    border: 1px solid #8a4d03;
+    border-top: 1px solid #fbb154;
     color: white;
 }}
-QPushButton#funcMain:checked:hover {{ background-color: #b86305; }}
+QPushButton#funcMain:checked:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffa54a, stop:0.45 #ea8108, stop:1 #b06506);
+}}
 QPushButton#funcGear {{
-    background-color: #3a3f4a;
-    border: 1px solid #4d525d;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #4a505d, stop:0.5 #3a3f4a, stop:1 #2c303a);
+    border: 1px solid #2a2e36;
+    border-top: 1px solid #5a6172;
     color: {c['text_primary']};
     font-size: {13 + d}pt;
     border-radius: 5px;
     padding: 0;
 }}
-QPushButton#funcGear:hover {{ background-color: #454a55; }}
+QPushButton#funcGear:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #565d6c, stop:0.5 #454a57, stop:1 #353a44);
+    border-top: 1px solid #6a7384;
+}}
+QPushButton#funcGear:pressed {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #2c303a, stop:1 #3a3f4a);
+}}
 
-/* Progress bars — HP red, MP blue, generic falls back to accent. */
+/* Progress bars — glossy fill suggests liquid in a tube. */
 QProgressBar {{
-    background-color: #1a1a1a;
-    border: 1px solid {c['border']};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #0e0e0e, stop:1 #1d1d1d);
+    border: 1px solid #2a2a2a;
+    border-top: 1px solid #050505;
     border-radius: 3px;
 }}
-QProgressBar::chunk {{ background-color: {c['accent']}; border-radius: 2px; }}
-QProgressBar#hpBar::chunk {{ background-color: #d94a4a; border-radius: 2px; }}
-QProgressBar#mpBar::chunk {{ background-color: #3a8dd9; border-radius: 2px; }}
+QProgressBar::chunk {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #4a8fc9, stop:0.5 #1f6aa5, stop:1 #144d7a);
+    border-radius: 2px;
+}}
+QProgressBar#hpBar::chunk {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ec5e5e, stop:0.5 #d94a4a, stop:1 #a02e2e);
+    border-radius: 2px;
+}}
+QProgressBar#mpBar::chunk {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #5fa8e8, stop:0.5 #3a8dd9, stop:1 #1f5b9a);
+    border-radius: 2px;
+}}
 QLabel#progressText {{ color: {c['text_primary']}; font-size: {10 + d}pt; }}
 
 /* Stats card — icon, primary value, secondary rate. */
 QLabel#statIcon {{ font-size: {16 + d}pt; min-width: 26px; }}
 QLabel#statPrimary {{
-    font-family: "{FAMILY_MONO}";
-    font-size: {13 + d}pt;
-    font-weight: bold;
+    font-family: "{FAMILY_UI}", "{FAMILY_UI_FALLBACK_CJK}";
+    font-size: {12 + d}pt;
+    font-weight: 600;
+    letter-spacing: 0.3px;
     color: {c['text_primary']};
 }}
 QLabel#statRate {{
-    font-family: "{FAMILY_MONO}";
-    font-size: {10 + d}pt;
+    font-family: "{FAMILY_UI}", "{FAMILY_UI_FALLBACK_CJK}";
+    font-size: {8 + d}pt;
+    font-weight: 400;
     color: {c['text_tertiary']};
 }}
 QPushButton#resetBtn {{
@@ -580,14 +639,24 @@ QPushButton#footerIcon:hover {{
     border: 1px solid {c['accent']};
 }}
 
-/* Small icon-only button (refresh, etc.). */
+/* Small icon-only button (refresh, unlock, gear, etc.). */
 QPushButton#iconBtn {{
-    background-color: transparent;
-    border: 1px solid {c['border_light']};
-    border-radius: 4px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #3a3a3a, stop:1 #2a2a2a);
+    border: 1px solid #1f1f1f;
+    border-top: 1px solid #4a4a4a;
     color: {c['text_primary']};
     font-size: {12 + d}pt;
+    border-radius: 4px;
     padding: 0;
 }}
-QPushButton#iconBtn:hover {{ background-color: {c['secondary_hover']}; }}
+QPushButton#iconBtn:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #464646, stop:1 #353535);
+    border-top: 1px solid #5a5a5a;
+}}
+QPushButton#iconBtn:pressed {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #252525, stop:1 #353535);
+}}
 """

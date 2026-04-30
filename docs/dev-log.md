@@ -5,6 +5,125 @@ Newest entries on top.
 
 ---
 
+## 2026-04-30 — Main-panel UI redesign complete; next phase = field wiring
+
+### What got done
+
+The original sidebar+pages window became the **settings dialog**; a brand-new
+compact runtime panel ([flasher/main.py](../flasher/main.py)) is now the main
+window. Loosely modelled on Fa10TM3As — narrow, dense, dark, frameless.
+
+#### Layout (top → bottom)
+- **Title bar (custom dark)** — `RED TEAM` mono label, drag-to-move, double-click
+  maximize, –/□/✕ controls (close hovers red). Replaces the OS title bar that
+  used to clash with the dark body.
+- **Login row** — `🔓 解除鎖定` icon button + `⚙` shortcut to 技能設定 + login
+  dropdown + `↻` refresh. All icon-only with tooltips.
+- **Config row** — `騎士.ini` combo + 讀取/儲存/新增.
+- **HP / MP bars** — red HP, blue MP, glossy gradient fill.
+- **Three function toggles + shared gear** — 🛡️ / 🤖 / 🧘, icon-only with hover
+  tooltips. Single shared `⚙` opens 機器人設定 at the inner tab matching the
+  most-recently-toggled feature.
+  - 保護 starts checked by default and is **independent** (can stay on while
+    others toggle).
+  - 機器人 ↔ 娃娃 are **mutually exclusive** and **share active colour**
+    (changing one updates the other; 保護 keeps its own colour).
+  - **Right-click any toggle → `QColorDialog`** to pick a custom active colour.
+- **Stats card** — three rows: 📖 EXP (light blue), 💰 gold (warm gold), ⏱
+  time (light brown). Each row is icon + primary value + per-hour rate
+  (right-aligned, dimmer). `↻` reset tucked into the bottom-right corner of
+  the card; tooltip explains the upgrade/death reset reason. Numbers are Inter
+  semibold (was Cascadia Mono bold — felt too chunky).
+- **Console log** — green-on-black mono, with a `▾`/`▴` chevron above to
+  collapse to ~5 lines (window auto-resizes to 580 px when collapsed,
+  back to 800 px when expanded).
+- **Footer** — 置頂 checkbox / 🪪 驗證資訊 / 🕵️ OCR 設定 / `Ver: 0.1.0`.
+
+#### Settings dialog ([flasher/settings_dialog.py](../flasher/settings_dialog.py))
+- `QDialog` wrapping the same sidebar + page stack the old MainWindow used.
+  Sidebar entries: 機器人 / 技能 / 硬體 / 環境 (主畫面 dropped — that was the
+  old dashboard, now replaced by the compact panel).
+- Pages keep calling `self.app.set_status / set_font_size / set_theme /
+  switch_page`; the dialog forwards those to the parent MainWindow so theme
+  changes still propagate globally.
+
+#### 機器人設定 page restructure ([flasher/pages/bot_settings.py](../flasher/pages/bot_settings.py))
+- Inner `QTabWidget` with three tabs: **保護設定 / 自動設定 / 娃娃設定**.
+- 自動設定 holds the original full bot_settings content (戰鬥模式 / 通用 /
+  被包圍動作 / 武器與安全 / 拾取/殺怪 / 黑名單).
+- 保護設定 + 娃娃設定 are placeholder cards for now — the icons in the main
+  panel route here but the actual fields haven't been built.
+
+#### Visual polish — metallic / 3D feel
+- All buttons (funcMain, funcGear, secondary, iconBtn) use vertical
+  qlineargradient with a lighter top edge + darker bottom for a polished
+  metal look. `:pressed` flips the gradient to feel pushed in.
+- Custom colours picked via right-click also gradient-ize: `_apply_checked_color`
+  computes top/mid/bottom shades via `QColor.lighter()` / `.darker()`.
+- HP / MP chunks have a 3-stop glossy gradient (looks like liquid in a tube).
+- Stats card has a faint top-down sheen with subtle 1 px highlight on top
+  edge, shadow on bottom.
+
+### Files touched
+- Rewrote [main.py](../flasher/main.py) (compact panel + TitleBar +
+  FunctionButton with right-click colour picker).
+- New [settings_dialog.py](../flasher/settings_dialog.py).
+- Heavy QSS work in [style.py](../flasher/style.py) (gradients, title bar,
+  func buttons, progress bar chunks, inner tabs, footer icons, reset button,
+  stats labels).
+- [bot_settings.py](../flasher/pages/bot_settings.py) restructured into three
+  inner tabs.
+- Deleted [pages/main_page.py](../flasher/pages/) (orphaned dashboard).
+- Added [README.md](../README.md) and [run.sh](../run.sh) (Linux launcher).
+
+### Verification
+- Offscreen smoke test constructs every page (bot/skill/hardware/env) without
+  errors.
+- Mutual exclusion: 機器人 ↔ 娃娃 covered by assertions; 保護 stays
+  independent. Most-recent activation order drives gear routing.
+- Colour bind: 機器人 ↔ 娃娃 sync bidirectionally via `colorChanged` signal +
+  same-value short-circuit; 保護 untouched.
+- Log fold: max-height + window-height assertions both pass.
+- Pushed to `origin/main` (`3d1de1c`). Switched remote from HTTPS to SSH so
+  pushes work without a stored token.
+
+### Next phase — field functionality (this is what's still placeholder)
+
+The UI is essentially the final shape. Almost every field is currently
+cosmetic and needs to be wired to real behaviour:
+
+| Component | Current state | What it needs |
+|---|---|---|
+| `🔓 解除鎖定` | no-op icon button | license / panel-lock state machine |
+| `⚙` next to unlock | works (jumps to 技能設定) | — |
+| Login dropdown | hard-coded one entry | populate from saved accounts; selection persists |
+| `↻` refresh (login) | no-op | re-detect connected accounts / re-validate license |
+| `騎士.ini` combo + 讀取/儲存/新增 | dummy items, no I/O | hit a real json/ini load/save layer; `新增` should clone-from-template |
+| HP / MP bars | static `1850/2000`, `320/500` | hook to game-memory reader or HP/MP-zone OCR |
+| 🛡️ / 🤖 / 🧘 toggles | toggle state only | actually start/stop the corresponding bot loops |
+| 機器人設定 → 保護設定 tab | placeholder card | port `保護功能` from 技能設定 (回捲熱鍵 / HP / MP 護身) |
+| 機器人設定 → 娃娃設定 tab | placeholder card | new fields: 自動補血/補魔範圍, 跟團優先順序, etc. |
+| 機器人設定 → 自動設定 tab | full UI, no I/O | persist values via the ini layer; emit to bot runtime |
+| Stats card 📖 / 💰 / ⏱ | static `0.0000% / 0` | real exp/gold/time tracker, refreshed at ~1 Hz |
+| `↻` reset (stats card) | no-op | zero counters + restart `time.monotonic()` |
+| Console log | hard-coded sample lines | wire to a real event stream from the bot runtime |
+| `🪪 驗證資訊` | static popup | show actual license server response (expiry, plan, etc.) |
+| `🕵️ OCR 設定` | jumps to 環境設定 tab | the env tab itself still needs OCR model picker + capture-zone tool |
+| 置頂 | works (Qt window flag) | — |
+
+Settings persistence layer hasn't been written. Once that exists, every
+field that has a `cfg` entry in the page can be auto-saved/loaded — the
+`Page.serialize()` / `Page.apply()` plumbing is already in place.
+
+### Decisions worth recording
+- `tools/arduino-cli.yaml` still has Windows absolute paths from the original
+  bootstrap. Linux GUI work doesn't need it (flash flow won't run here);
+  defer fixing the YAML until someone needs to flash on Linux.
+- `requirements.txt` is stale (lists `customtkinter`); the codebase is
+  PySide6 + pyserial only. Bump when convenient.
+
+---
+
 ## 2026-04-25 — Project bootstrap & SOP-001 begins
 
 ### Architecture decisions
