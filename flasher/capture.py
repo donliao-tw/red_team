@@ -166,15 +166,20 @@ ROI_1920x1032 = {
 }
 
 
-def parse_hpmp(text_lines: list[str]) -> tuple[int, int] | None:
+def parse_hpmp(text_lines: list[str],
+               expected_max: int | None = None) -> tuple[int, int] | None:
     """Pull (current, max) from RapidOCR output of an HP/MP ROI.
 
     OCR mis-reads the slash three different ways depending on font size:
-      * "308/308" → ['308', '1308']  (slash → '1' token-splits)
-      * "308/308" → ['HP:308/308']   (slash kept, regex finds two ints)
-      * "308/308" → ['HP:3087308']   (slash → '7' fuses into one token)
+      * "308/308" → ['308', '1308']   (slash → '1' splits the token)
+      * "308/308" → ['HP:308/308']    (slash kept, regex finds two ints)
+      * "308/308" → ['HP:3087308']    (slash → '7'/'1' fuses one token)
 
-    We handle all three.
+    The fused case is ambiguous when current and max have different
+    digit counts ("507308" might be 50/308 or 507/308). When we know
+    ``expected_max`` from a previous good OCR, we anchor on it; without
+    it we try 3-digit, 4-digit, 2-digit max in order and reject splits
+    where current > max.
     """
     import re
     nums = []
@@ -190,23 +195,32 @@ def parse_hpmp(text_lines: list[str]) -> tuple[int, int] | None:
             raw_max = int(s[1:])
         return cur, raw_max
 
-    if len(nums) == 1:
-        # Slash fused into a single token. Symmetric values are the
-        # common case (cur == max at full HP/MP), so split in halves.
-        s = nums[0]
-        n = len(s)
-        if n >= 3 and n % 2 == 1:
-            half = n // 2
-            try:
-                return int(s[:half]), int(s[half + 1:])  # skip the '7'/'1' middle
-            except ValueError:
-                return None
-        if n >= 2 and n % 2 == 0:
-            half = n // 2
-            try:
-                return int(s[:half]), int(s[half:])
-            except ValueError:
-                return None
+    if len(nums) != 1:
+        return None
+
+    s = nums[0]
+
+    # Best case: anchor on a known max. The slash usually became a single
+    # digit between cur and max, so the token looks like CUR + ?CHAR + MAX.
+    if expected_max is not None:
+        mstr = str(expected_max)
+        if s.endswith(mstr) and len(s) > len(mstr):
+            cur_str = s[:-len(mstr) - 1]  # drop the artefact char
+            if cur_str.isdigit():
+                return int(cur_str), expected_max
+
+    # No max hint — try a few common max-digit lengths and pick one
+    # where 0 <= cur <= max.
+    for max_digits in (3, 4, 2):
+        if len(s) < max_digits + 2:
+            continue
+        mstr = s[-max_digits:]
+        cur_str = s[:-(max_digits + 1)]  # skip artefact char
+        if not (cur_str.isdigit() and mstr.isdigit()):
+            continue
+        cur, mx = int(cur_str), int(mstr)
+        if 0 <= cur <= mx:
+            return cur, mx
     return None
 
 
@@ -641,11 +655,15 @@ class GameMonitor:
 
             ocr = ocr_rois(img, self._poll_rois)
 
-            hp = parse_hpmp(ocr.get("hp_text", []))
+            # Pass the previously-learned max as a hint so a single-token
+            # OCR result (e.g. "507308" = 50/308 with slash misread as '7')
+            # gets split correctly even when cur and max have different
+            # digit counts.
+            hp = parse_hpmp(ocr.get("hp_text", []), expected_max=self._hp_max)
             if hp:
                 self._hp_max = hp[1]
                 self.hp_changed.emit(*hp)
-            mp = parse_hpmp(ocr.get("mp_text", []))
+            mp = parse_hpmp(ocr.get("mp_text", []), expected_max=self._mp_max)
             if mp:
                 self._mp_max = mp[1]
                 self.mp_changed.emit(*mp)
