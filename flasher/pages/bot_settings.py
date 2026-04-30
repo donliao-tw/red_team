@@ -1,4 +1,4 @@
-"""機器人設定 — combat behaviour, teleport triggers, blacklists."""
+"""機器人設定 — three inner tabs for the three function modes."""
 from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
@@ -13,9 +13,34 @@ DEFAULT_PICKUP_BLACKLIST = "箭;肉;+0 箭;+0 銀箭"
 
 class BotSettingsPage(Page):
     title = "機器人設定"
-    subtitle = "戰鬥模式、瞬移觸發、黑名單"
+    subtitle = "保護 / 自動 / 娃娃"
 
     def build(self) -> None:
+        self.tabs = QtWidgets.QTabWidget()
+        self.tabs.setObjectName("innerTabs")
+        self.tabs.setDocumentMode(True)
+
+        self._tab_indices: dict[str, int] = {}
+        self._tab_indices["protect"] = self.tabs.addTab(self._build_protect_tab(), "保護設定")
+        self._tab_indices["afk"]     = self.tabs.addTab(self._build_afk_tab(),     "自動設定")
+        self._tab_indices["doll"]    = self.tabs.addTab(self._build_doll_tab(),    "娃娃設定")
+
+        self.body_layout.addWidget(self.tabs, stretch=1)
+
+    def show_tab(self, key: str) -> None:
+        """Switch to the given inner tab; called by MainWindow's gear."""
+        idx = self._tab_indices.get(key)
+        if idx is not None:
+            self.tabs.setCurrentIndex(idx)
+
+    # ------------------------------------------------------------------ tabs
+
+    def _build_afk_tab(self) -> QtWidgets.QWidget:
+        wrap = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(wrap)
+        outer.setContentsMargins(0, 8, 0, 0)
+        outer.setSpacing(8)
+
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -46,15 +71,40 @@ class BotSettingsPage(Page):
         cols.addLayout(col_a, stretch=1)
         cols.addLayout(col_b, stretch=1)
 
-        self.body_layout.addWidget(scroll, stretch=1)
-
-        self.body_layout.addWidget(widgets.help_button(
+        outer.addWidget(scroll, stretch=1)
+        outer.addWidget(widgets.help_button(
             [
                 "瞬捲熱鍵不管在哪一頁都請放在同一格上",
-                "回捲熱鍵請於「技能設定 → 保護功能」中設定",
+                "回捲熱鍵請於「保護設定」分頁中設定",
             ],
             label_text="使用注意事項（hover）",
         ))
+        return wrap
+
+    def _build_protect_tab(self) -> QtWidgets.QWidget:
+        return self._placeholder_tab(
+            "保護功能設定",
+            "回捲熱鍵、HP/MP 護身、自動回村等保命行為。",
+        )
+
+    def _build_doll_tab(self) -> QtWidgets.QWidget:
+        return self._placeholder_tab(
+            "娃娃功能設定",
+            "輔助治療角色（娃娃）跟團行為，例如自動補血/補魔範圍與優先順序。",
+        )
+
+    def _placeholder_tab(self, title: str, hint: str) -> QtWidgets.QWidget:
+        w = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(w)
+        v.setContentsMargins(0, 16, 0, 0)
+        v.setSpacing(12)
+
+        card, card_layout = widgets.make_card(title)
+        card_layout.addWidget(widgets.hint(hint))
+        card_layout.addWidget(widgets.label("（內容延後實作）", secondary=True))
+        v.addWidget(card)
+        v.addStretch(1)
+        return w
 
     # ------------------------------------------------------------------ helpers
 

@@ -186,7 +186,38 @@ def make_qss() -> str:
     outline: none;
 }}
 
-QMainWindow {{ background-color: {c['bg_app']}; }}
+QMainWindow, QDialog {{ background-color: {c['bg_app']}; }}
+
+/* Frameless main-window shell + custom title bar. */
+QFrame#appShell {{
+    background-color: {c['bg_app']};
+    border: 1px solid {c['border']};
+}}
+QFrame#titleBar {{
+    background-color: #1a1a1a;
+    border-bottom: 1px solid {c['border']};
+}}
+QLabel#titleBarLabel {{
+    color: {c['text_secondary']};
+    font-family: "{FAMILY_MONO}";
+    font-size: {10 + d}pt;
+    font-weight: bold;
+}}
+QPushButton#titleBtn {{
+    background-color: transparent;
+    border: none;
+    color: {c['text_secondary']};
+    font-size: {11 + d}pt;
+    padding: 0;
+}}
+QPushButton#titleBtn:hover {{
+    background-color: rgba(255, 255, 255, 0.08);
+    color: {c['text_primary']};
+}}
+QPushButton#titleBtn[role="close"]:hover {{
+    background-color: #e74c3c;
+    color: white;
+}}
 
 QScrollArea, QScrollArea > QWidget > QWidget {{
     background-color: transparent;
@@ -423,4 +454,140 @@ QScrollBar::handle:horizontal {{
     background: {c['scrollbar']};
     border-radius: 5px; min-width: 24px;
 }}
+
+/* ─── Compact main panel ─── */
+
+/* Function row — compact dark-grey pill toggles + shared gear. */
+QFrame#funcRow {{ background-color: transparent; }}
+QPushButton#funcMain {{
+    background-color: #3a3f4a;
+    border: 1px solid #4d525d;
+    color: {c['text_primary']};
+    font-size: {14 + d}pt;
+    border-radius: 5px;
+    padding: 0;
+    text-align: center;
+    min-height: 40px;
+}}
+QPushButton#funcMain:hover {{ background-color: #454a55; }}
+QPushButton#funcMain:checked {{
+    background-color: #d97706;
+    border: 1px solid #d97706;
+    color: white;
+}}
+QPushButton#funcMain:checked:hover {{ background-color: #b86305; }}
+QPushButton#funcGear {{
+    background-color: #3a3f4a;
+    border: 1px solid #4d525d;
+    color: {c['text_primary']};
+    font-size: {13 + d}pt;
+    border-radius: 5px;
+    padding: 0;
+}}
+QPushButton#funcGear:hover {{ background-color: #454a55; }}
+
+/* Progress bars — HP red, MP blue, generic falls back to accent. */
+QProgressBar {{
+    background-color: #1a1a1a;
+    border: 1px solid {c['border']};
+    border-radius: 3px;
+}}
+QProgressBar::chunk {{ background-color: {c['accent']}; border-radius: 2px; }}
+QProgressBar#hpBar::chunk {{ background-color: #d94a4a; border-radius: 2px; }}
+QProgressBar#mpBar::chunk {{ background-color: #3a8dd9; border-radius: 2px; }}
+QLabel#progressText {{ color: {c['text_primary']}; font-size: {10 + d}pt; }}
+
+/* Stats card — icon, primary value, secondary rate. */
+QLabel#statIcon {{ font-size: {16 + d}pt; min-width: 26px; }}
+QLabel#statPrimary {{
+    font-family: "{FAMILY_MONO}";
+    font-size: {13 + d}pt;
+    font-weight: bold;
+    color: {c['text_primary']};
+}}
+QLabel#statRate {{
+    font-family: "{FAMILY_MONO}";
+    font-size: {10 + d}pt;
+    color: {c['text_tertiary']};
+}}
+QPushButton#resetBtn {{
+    background-color: transparent;
+    border: 1px solid {c['border_light']};
+    border-radius: 5px;
+    color: {c['text_primary']};
+    font-size: {13 + d}pt;
+    padding: 0;
+}}
+QPushButton#resetBtn:hover {{
+    background-color: {c['secondary_hover']};
+    border: 1px solid {c['accent']};
+    color: {c['accent']};
+}}
+QLabel#warningHint {{ color: #f5a800; font-size: {9 + d}pt; }}
+QLabel#banner {{ color: #f5a800; font-size: {9 + d}pt; padding: 2px 0; }}
+QLabel#verLabel {{ color: {c['text_tertiary']}; font-size: {9 + d}pt; }}
+
+/* Console log — green-on-black, monospace. */
+QPlainTextEdit#consoleLog {{
+    background-color: #1a1a1a;
+    color: #6ce06c;
+    border: 1px solid {c['border']};
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: "{FAMILY_MONO}";
+    font-size: {9 + d}pt;
+    selection-background-color: {c['accent']};
+}}
+
+/* Inner tab bar (used inside 機器人設定). */
+QTabWidget#innerTabs::pane {{
+    border: 1px solid {c['border']};
+    border-radius: 6px;
+    background-color: {c['bg_card']};
+    top: -1px;
+}}
+QTabWidget#innerTabs QTabBar {{ qproperty-drawBase: 0; }}
+QTabBar::tab {{
+    background-color: transparent;
+    color: {c['text_secondary']};
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 8px 18px;
+    margin-right: 4px;
+    font-size: {11 + d}pt;
+}}
+QTabBar::tab:hover {{ background-color: {c['nav_hover']}; }}
+QTabBar::tab:selected {{
+    background-color: {c['bg_card']};
+    color: {c['text_primary']};
+    border: 1px solid {c['border']};
+    border-bottom: 1px solid {c['bg_card']};
+}}
+
+/* Footer icon button — bigger so emoji glyphs read clearly. */
+QPushButton#footerIcon {{
+    background-color: transparent;
+    border: 1px solid {c['border_light']};
+    border-radius: 6px;
+    color: {c['text_primary']};
+    font-size: {16 + d}pt;
+    padding: 0;
+}}
+QPushButton#footerIcon:hover {{
+    background-color: {c['secondary_hover']};
+    border: 1px solid {c['accent']};
+}}
+
+/* Small icon-only button (refresh, etc.). */
+QPushButton#iconBtn {{
+    background-color: transparent;
+    border: 1px solid {c['border_light']};
+    border-radius: 4px;
+    color: {c['text_primary']};
+    font-size: {12 + d}pt;
+    padding: 0;
+}}
+QPushButton#iconBtn:hover {{ background-color: {c['secondary_hover']}; }}
 """
