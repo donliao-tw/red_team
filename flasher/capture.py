@@ -451,10 +451,13 @@ class FrameStreamer:
 class GameMonitor:
     """Two-rate poller for the game window:
 
-      * Fast loop (default 200 ms / 5 Hz) — HP / MP via pixel mask.
-        Sub-second response so the bot can react to damage.
-      * Slow loop (default 2000 ms / 0.5 Hz) — OCR for LV / EXP / Lawful
-        and re-confirm HP / MP exact numbers + max.
+      * Fast loop (default 200 ms / 5 Hz) — HP / MP via template match.
+        Sub-millisecond, exact integer. The bar text is rendered in a
+        fixed pixel font on a fixed grid — Hamming distance against
+        per-glyph 10×10 binary templates is deterministic, never wrong.
+      * Slow loop (default 5000 ms) — RapidOCR for LV / EXP / Lawful
+        (the non-HP/MP fields whose layout / font isn't fixed enough
+        for templates).
 
     Holds a single FrameStreamer that keeps WGC running, so each tick
     is a memory read (~1 ms) instead of a fresh capture (~275 ms).
@@ -470,7 +473,7 @@ class GameMonitor:
     def __init__(
         self,
         fast_ms: int = 200,
-        slow_ms: int = 2000,
+        slow_ms: int = 5000,
         needle: str = "Lineage",
         # Back-compat alias used by the older single-rate constructor.
         interval_ms: int | None = None,
@@ -478,6 +481,8 @@ class GameMonitor:
         if interval_ms is not None:
             slow_ms = interval_ms
         from PySide6 import QtCore
+        from digit_match import load_templates
+        self._templates = load_templates()
 
         # We can't subclass QObject inside the function, so we compose
         # — an inner QObject holds the signals, and the public surface
@@ -517,15 +522,21 @@ class GameMonitor:
         self._slow_ms = slow_ms
 
         self._needle = needle
-        self._busy = False  # serialises slow OCR worker
+        self._busy = False        # serialises slow OCR worker
         self._connected: bool | None = None
         self._streamer: FrameStreamer | None = None
         self._hp_max: int | None = None
         self._mp_max: int | None = None
 
-        # OCR roughly halves in cost when we drop the chat ROI, which
-        # carries no actionable bot data anyway. Keep the rest.
-        self._poll_rois = {k: v for k, v in ROI_1920x1032.items() if k != "chat_log"}
+        # The fast loop reads HP/MP via template match (sub-ms). The
+        # slow loop OCRs the rest — chat ROI is dropped (no actionable
+        # data) and hp/mp text are owned by the fast loop.
+        self._poll_rois = {
+            k: v for k, v in ROI_1920x1032.items()
+            if k not in ("chat_log", "hp_text", "mp_text")
+        }
+        self._hp_box = ROI_1920x1032["hp_text"]
+        self._mp_box = ROI_1920x1032["mp_text"]
 
     def start(self) -> None:
         # Force OCR model init on the main thread *before* any worker
@@ -539,8 +550,8 @@ class GameMonitor:
             self._fast_timer.start(self._fast_ms)
         if not self._slow_timer.isActive():
             self._slow_timer.start(self._slow_ms)
-        # Fire one slow poll immediately so we get the OCR'd max values
-        # quickly and the fast loop has something to scale against.
+        # Fire once immediately so HP/MP populate without waiting a tick.
+        self._fast_poll()
         self._slow_poll()
 
     def stop(self) -> None:
@@ -582,14 +593,19 @@ class GameMonitor:
         if size != self._last_size:
             self._last_size = size
             if size == (1280, 960):
-                self._poll_rois = {k: v for k, v in ROI_1280x960.items() if k != "chat_log"}
-                HP_BAR_BOX = HP_BAR_BOX_1280
-                MP_BAR_BOX = MP_BAR_BOX_1280
+                src = ROI_1280x960
             elif size == (1920, 1032):
-                self._poll_rois = {k: v for k, v in ROI_1920x1032.items() if k != "chat_log"}
-                HP_BAR_BOX = HP_BAR_BOX_1920
-                MP_BAR_BOX = MP_BAR_BOX_1920
+                src = ROI_1920x1032
             else:
+                src = None
+            if src is not None:
+                self._poll_rois = {
+                    k: v for k, v in src.items()
+                    if k not in ("chat_log", "hp_text", "mp_text")
+                }
+                self._hp_box = src["hp_text"]
+                self._mp_box = src["mp_text"]
+            if src is None:
                 self.window_size_wrong.emit(*size)
                 self._set_connection(
                     False,
@@ -616,17 +632,24 @@ class GameMonitor:
         return True
 
     def _fast_poll(self) -> None:
+        """HP/MP via template match — sub-millisecond, exact integer."""
         if self._streamer is None:
             return
         img = self._streamer.latest()
         if img is None:
             return
-        if self._hp_max is not None:
-            ratio = hp_fill_ratio(img)
-            self.hp_changed.emit(round(self._hp_max * ratio), self._hp_max)
-        if self._mp_max is not None:
-            ratio = mp_fill_ratio(img)
-            self.mp_changed.emit(round(self._mp_max * ratio), self._mp_max)
+        import numpy as np
+        from digit_match import read_hp, read_mp
+        hp_arr = np.asarray(img.crop(self._hp_box))
+        mp_arr = np.asarray(img.crop(self._mp_box))
+        hp = read_hp(hp_arr, self._templates)
+        if hp:
+            self._hp_max = hp[1]
+            self.hp_changed.emit(*hp)
+        mp = read_mp(mp_arr, self._templates)
+        if mp:
+            self._mp_max = mp[1]
+            self.mp_changed.emit(*mp)
 
     def _slow_poll(self) -> None:
         if self._busy:
@@ -653,20 +676,9 @@ class GameMonitor:
                 if img is None:
                     return
 
+            # HP/MP are read by the fast loop via template match; only
+            # OCR the slow set (level_exp / lawful / debuffs / action_bar).
             ocr = ocr_rois(img, self._poll_rois)
-
-            # Pass the previously-learned max as a hint so a single-token
-            # OCR result (e.g. "507308" = 50/308 with slash misread as '7')
-            # gets split correctly even when cur and max have different
-            # digit counts.
-            hp = parse_hpmp(ocr.get("hp_text", []), expected_max=self._hp_max)
-            if hp:
-                self._hp_max = hp[1]
-                self.hp_changed.emit(*hp)
-            mp = parse_hpmp(ocr.get("mp_text", []), expected_max=self._mp_max)
-            if mp:
-                self._mp_max = mp[1]
-                self.mp_changed.emit(*mp)
 
             lv, exp = parse_level_exp(ocr.get("level_exp", []))
             if lv:

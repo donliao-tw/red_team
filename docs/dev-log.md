@@ -5,6 +5,102 @@ Newest entries on top.
 
 ---
 
+## 2026-04-30 (late) — HP/MP read: template match replaces OCR + pixel mask
+
+### Symptom
+
+User reported the panel HP value drifting off by 1–3 from the in-game
+number ("差1，4xx/5xx 滴血不是都會錯嗎"). Both routes feeding the
+display were unreliable:
+
+* **Pixel-mask fast loop** — the column-coverage ratio rounds to ±1 HP
+  at sub-pixel resolution (1280×960: 280 px bar / 308 max ≈ 0.91 px/HP),
+  plus 1–3 gradient cols at the fill boundary land outside the strict
+  red mask.
+* **RapidOCR mid loop** — empirical accuracy 9/15 (40% error) on the
+  HP text. RapidOCR misreads the "HP:" prefix (H→T, fuses HP into
+  digits as in "HP892"), splits the line into multi-token output that
+  ``parse_hpmp`` then mis-assembles, and occasionally garbles the
+  whole line ("308/LLidm"). Per-pass cost was also ~3 s for both
+  ROIs — far slower than I'd estimated.
+
+### Decision
+
+Drop both. The Lineage HP/MP text is rendered in a **fixed pixel
+font on a fixed 10-px grid** — every digit always produces an
+identical bitmap. Hamming distance against per-glyph 10×10 binary
+templates is deterministic and infinitely cheap.
+
+Validation across 30 captured frames: every cell matched its
+template at distance **0**. There's no ambiguity.
+
+### Implementation
+
+* [flasher/digit_match.py](../flasher/digit_match.py) — template
+  loader, HP/MP text masks (HP: ``R>240 ∧ G>200 ∧ B>200`` — pinkish
+  white on red; MP: ``B>240 ∧ R>150 ∧ G>150`` — bluish white on
+  purple; the tight B threshold is critical so MP stroke widths
+  match the HP-derived templates), cell extractor, and
+  ``read_hp`` / ``read_mp``.
+* [flasher/templates/glyph_*.png](../flasher/templates/) — 12 binary
+  10×10 PNGs (0-9, slash, colon). All extracted from real captured
+  frames at 1280×960; '6' is sourced from MP because no HP cur in
+  the test sample contained it.
+* The reader is **alignment-agnostic**: HP right-aligns the whole
+  string within the bar (the silver UI to the left of the red bar
+  pads the start), MP left-aligns it. Instead of assuming an
+  alignment we template-match the slash to find its cell, then walk
+  digits left for cur and right for max, stopping at a non-digit
+  cell (the colon, or empty padding). This handles 1/2/3-digit cur
+  for both HP and MP without branching.
+
+### Wiring
+
+[flasher/capture.py](../flasher/capture.py) ``GameMonitor`` collapses
+back to two rates:
+
+| Loop | Cadence | Job |
+|---|---|---|
+| fast | 200 ms | template match HP/MP — 100% accurate, ~1 ms |
+| slow | 5 s | RapidOCR LV / EXP / Lawful (still the right tool) |
+
+Pixel-mask code (``hp_fill_ratio`` / ``mp_fill_ratio`` /
+``_column_coverage``) and the mid OCR loop are deleted. Templates
+load once at ``GameMonitor.__init__``.
+
+### Numbers
+
+* HP read: ~314 µs/call. MP read: ~314 µs. Combined: 0.63 ms/frame
+  (~1600 Hz capable, headroom over the 5 Hz fast loop is enormous).
+* RapidOCR HP+MP combined: ~3000 ms. Net speedup: **~4800×**.
+* Validation: 30 saved frames + 30 s live test (HP 124→156 regen) +
+  5 frames with MP=70/116 (2-digit cur) — all 100%.
+
+### Untested
+
+* HP cur 1–2 digits (everything we captured was 3-digit).
+* MP cur 1 digit. The reader's slash-anchored logic should make
+  these no different from the cases it has handled, but it isn't
+  literally proven yet.
+
+### Throwaway scripts kept under flasher/
+
+These were the iteration tools and may be useful for other resolutions
+later. Not on the runtime path:
+
+* ``capture_glyphs.py`` — drop 30 native + 4× HP/MP crops to
+  ``samples/glyphs/`` for offline glyph extraction.
+* ``extract_templates.py`` — generate the 12 templates from a
+  hard-coded source-frame map (re-run if templates are deleted).
+* ``test_digit_match.py`` — replay the reader over saved frames for
+  regression checks.
+* ``ocr_accuracy_test.py`` — original RapidOCR accuracy harness;
+  kept as evidence of the 9/15 baseline.
+* ``live_match_test.py`` — 30 s @ 5 Hz live read, saves crops every
+  1 s for spot verification against the in-game number.
+
+---
+
 ## 2026-04-30 (evening) — OCR pipeline + monitor wired into main panel
 
 ### What got done
