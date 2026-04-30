@@ -323,20 +323,26 @@ HP_BAR_BOX = HP_BAR_BOX_1920
 MP_BAR_BOX = MP_BAR_BOX_1920
 
 
-def _rightmost_match_ratio(arr_mask) -> float:
+def _column_coverage(arr_mask) -> float:
+    """Fraction of columns that contain at least one matching pixel.
+
+    Direction-agnostic — works whether the bar fills left-to-right,
+    right-to-left, or shrinks from both ends. Lineage's HP bar
+    actually drains from the *left* (full HP = full red, low HP =
+    bright red on the right with grey crust on the left), so the
+    earlier 'rightmost matching column' approach always returned 1.0.
+    """
     cols = arr_mask.any(axis=0)
-    if not cols.any():
-        return 0.0
-    return (cols.nonzero()[0].max() + 1) / cols.size
+    return cols.sum() / cols.size if cols.size else 0.0
 
 
 def hp_fill_ratio(img: Image.Image) -> float:
     """Fraction of the HP bar that's filled (0.0–1.0), via pixel mask.
 
     Mask matches the bar's saturated deep red only — the empty trough
-    has dark (R<80) crimson and bright peach trim above is desaturated
-    (G,B >> 0). Pure red has R≈125, G≈9, B≈0 — easy to isolate via
-    R > 3·G and R > 3·B with R > 80.
+    is desaturated grey/dark crimson and bright peach trim above is
+    desaturated (G,B >> 0). Pure red fill has R≈125, G≈9, B≈0 — easy
+    to isolate via R > 3·G and R > 3·B with R > 80.
     """
     import numpy as np
     arr = np.asarray(img.crop(HP_BAR_BOX))
@@ -344,7 +350,7 @@ def hp_fill_ratio(img: Image.Image) -> float:
     G = arr[..., 1].astype(int)
     B = arr[..., 2].astype(int)
     mask = (R > 80) & (R > G * 3) & (R > B * 3)
-    return _rightmost_match_ratio(mask)
+    return _column_coverage(mask)
 
 
 def mp_fill_ratio(img: Image.Image) -> float:
@@ -356,7 +362,7 @@ def mp_fill_ratio(img: Image.Image) -> float:
     B = arr[..., 2].astype(int)
     # MP bar is desaturated purple — B always slightly above R and G.
     mask = (B > 80) & (B > R) & (B > G)
-    return _rightmost_match_ratio(mask)
+    return _column_coverage(mask)
 
 
 # ──────────────────────────── FrameStreamer ────────────────────────────
