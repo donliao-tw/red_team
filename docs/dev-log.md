@@ -5,6 +5,126 @@ Newest entries on top.
 
 ---
 
+## 2026-04-30 (evening) — OCR pipeline + monitor wired into main panel
+
+### What got done
+
+Real game-state values now flow into the main panel widgets via a
+read-only capture / OCR pipeline. **No game-process touch** anywhere in
+the chain — Win32 ``EnumWindows`` for discovery, Windows.Graphics.Capture
+(WGC) for the framebuffer, RapidOCR (ONNX-Runtime) for text, NumPy for
+pixel masks. Anti-cheat-safe per CLAUDE.md.
+
+#### New module: [flasher/capture.py](../flasher/capture.py)
+
+- ``find_game_window(needle)`` — substring match via EnumWindows.
+- ``grab_frame(needle)`` — one-shot WGC capture (~275 ms, used by the
+  preview tool).
+- ``FrameStreamer`` — persistent WGC session that pushes the latest
+  frame into a thread-safe slot. Uses ``start_free_threaded()``,
+  throttles PIL conversion to 10 Hz so we don't burn 480 MB/s memcpy
+  at 60 Hz vsync. Reading ``latest()`` is sub-millisecond.
+- ``hp_fill_ratio()`` / ``mp_fill_ratio()`` — per-bar pixel masks.
+  HP mask: ``R > 80 ∧ R > 3·G ∧ R > 3·B``. Initial mask was ``R > 130``
+  (too strict, missed deep red R≈125, fooled by gold trim). Y range
+  also shifted from 815-833 to 824-840 so we sample pure red rows
+  rather than the peach trim above.
+- ``ocr_rois(img, rois)`` with per-ROI ``NO_UPSCALE_ROIS`` set — the
+  orange ribbon (level / EXP) loses contrast under bicubic upscale,
+  so OCR'd at native size. Other ROIs use 2× upscale to clear
+  RapidOCR's detection floor.
+- ``parse_hpmp()`` / ``parse_level_exp()`` — slash gets misread as
+  '1', so "308/308" comes back as ['308','1308']. Strip the leading
+  '1' when its length is len(cur)+1. EXP comes back split: ['79',
+  '1664%'] → reconstruct as '79.1664%'.
+- ``GameMonitor`` — two-rate poller:
+  - **Fast loop (200 ms / 5 Hz)**: pixel-mask HP/MP, emit ``hp_changed``
+    / ``mp_changed`` with ``round(max × ratio)``.
+  - **Slow loop (2000 ms target)**: OCR every ROI, refresh max values,
+    emit LV / EXP / Lawful. In practice the OCR pass takes ~10 s so
+    polls run back-to-back.
+  - Signals: hp/mp/level/exp/lawful/account/connection/window_size_wrong
+    /poll_started/poll_finished.
+
+#### Window-size enforcement
+
+- ``EXPECTED_CLIENT_SIZE = (1280, 960)`` — anything else means the
+  calibrated pixel positions are off, so OCR / pixel-mask read garbage.
+- ``_try_attach`` checks ``GetClientRect`` and either swaps to the
+  matching ROI / pixel-mask preset or emits ``window_size_wrong`` and
+  refuses to start polling.
+- Two ROI presets exist: ``ROI_1280x960`` (target) and ``ROI_1920x1032``
+  (for the maximised state we calibrated against earlier).
+- HP/MP pixel-mask boxes also have 1280 / 1920 variants
+  (``HP_BAR_BOX_1280`` etc.).
+
+#### Main-panel integration
+
+- ``_wire_game_monitor()`` instantiates ``GameMonitor`` 150 ms after
+  window paint, connects all signals to widget update slots.
+- HP / MP bars show the pixel-mask reading at 5 Hz, then the exact
+  OCR'd value when the slow OCR completes.
+- New ``LV / EXP`` badge row above the HP bar — gold ``28``, light-blue
+  ``79.1664%``. Defaults to ``—``; values land when slow OCR returns.
+- Login dropdown auto-populates from the game window title (regex
+  ``Login\s*\[([^\]]+)\]``); placeholder ``（等待偵測…）`` until then.
+- Console log no longer carries hard-coded sample lines. ``SAMPLE_LOG``
+  is empty — only real events (connection up / down) are appended.
+- All initial widget values default to **``?``** instead of fake numbers
+  (``1850 / 2000`` etc.) so it's visually obvious when no real reading
+  has landed.
+- ``LoadingOverlay`` — half-opacity black veil with ⧗ icon and
+  ``讀取中…`` message, shown during the ~12 s startup window where the
+  OCR model is loading + first capture is in flight. Dismissed on first
+  ``poll_finished``. Doubles as the size-mismatch warning surface
+  (``⚠ 遊戲視窗大小 1920×1032 / 請調整為 1280×960``).
+- Window position pinned **left edge** (x = 20, y = vertical centre)
+  rather than centred — game lives to the right.
+
+#### Bug fixed: onnxruntime + Qt event loop deadlock
+
+First-time RapidOCR initialisation **hangs forever** when invoked from
+a daemon thread spawned under ``QApplication.exec()``. Reproduced
+deterministically:
+
+- Standalone script ``cap.ocr_rois(img)`` runs in 11 s. ✓
+- Same call inside a ``threading.Thread`` started after
+  ``QApplication.processEvents()`` runs — never returns.
+- Pre-loading ``cap._get_ocr()`` on the main thread, then spawning the
+  worker — runs to completion in 10 s. ✓
+
+Fix: ``GameMonitor.start()`` calls ``_get_ocr()`` synchronously on the
+main thread before any timer / worker fires. Costs ~800 ms one-shot at
+launch.
+
+#### Standalone debug tool: [flasher/capture_preview.py](../flasher/capture_preview.py)
+
+A QDialog showing the latest captured frame with ROI overlays + OCR
+readouts on the side. Use for ROI calibration. Auto-refresh toggle,
+manual single-shot, opt-in OCR. Capture work runs on a worker thread,
+results pushed back to the GUI via Qt signals so the dialog never
+freezes.
+
+### Known broken / pending — debug tonight
+
+| Item | Status |
+|---|---|
+| **`ROI_1280x960` not yet calibrated** | Currently **derived** from the 1920×1032 boxes by simple bottom-/right-anchor translation. Lineage UI doesn't scale linearly between resolutions, so OCR returns nothing → all values stay ``?`` at 1280×960. **Need a real 1280×960 capture to fix coords.** |
+| **`HP_BAR_BOX_1280` / `MP_BAR_BOX_1280` not yet calibrated** | Same problem. Pixel mask currently misses, HP bar stays empty. |
+| OCR slow-pass latency | ~10 s/round (RapidOCR × 6 ROIs). Tolerable but could be parallelised. |
+| Re-attach when game closes / restarts | Not handled — streamer dies silently if window is closed. |
+| EXP rate / Gold rate / Time stopwatch | Stat-card rows still show ``?`` — need a tracker that diffs samples over time. |
+
+### Next session
+
+1. Capture a real 1280×960 frame (`samples/full_1280.png`).
+2. Recalibrate `ROI_1280x960` and `HP_BAR_BOX_1280` / `MP_BAR_BOX_1280`
+   against it. Confirm via `capture_preview.py`.
+3. Verify pixel-mask responsiveness on partial HP at 1280×960.
+4. Then: re-attach handler + stat trackers.
+
+---
+
 ## 2026-04-30 — Main-panel UI redesign complete; next phase = field wiring
 
 ### What got done

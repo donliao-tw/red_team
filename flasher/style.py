@@ -268,6 +268,46 @@ QFrame#card {{
 }}
 QFrame#subpanel {{ background-color: {c['bg_subpanel']}; border-radius: 8px; }}
 
+/* Loading veil shown during initial OCR + capture warm-up */
+QFrame#loadingOverlay {{
+    background-color: rgba(0, 0, 0, 0.55);
+    border-radius: 0;
+}}
+QLabel#loadingIcon {{
+    color: {c['accent']};
+    font-size: {28 + d}pt;
+    background: transparent;
+}}
+QLabel#loadingText {{
+    color: white;
+    font-size: {16 + d}pt;
+    font-weight: 700;
+    background: transparent;
+}}
+QLabel#loadingDetail {{
+    color: rgba(255, 255, 255, 0.6);
+    font-size: {10 + d}pt;
+    background: transparent;
+}}
+
+/* Level / EXP badge row above HP/MP bars */
+QLabel#statHeadLabel {{
+    color: {c['text_tertiary']};
+    font-size: {9 + d}pt;
+    font-weight: 600;
+    letter-spacing: 1px;
+}}
+QLabel#lvValue {{
+    color: #e6c14a;
+    font-size: {16 + d}pt;
+    font-weight: 700;
+}}
+QLabel#expValue {{
+    color: #7fb8e6;
+    font-size: {16 + d}pt;
+    font-weight: 700;
+}}
+
 /* Dashboard cards on the main page */
 QFrame#dashCard {{
     background-color: {c['bg_card']};

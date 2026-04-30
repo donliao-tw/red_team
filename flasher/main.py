@@ -13,6 +13,7 @@ import sys
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+import capture as cap
 import style
 from settings_dialog import SettingsDialog
 
@@ -26,20 +27,61 @@ MIN_SIZE = (400, 640)
 FONT_DELTAS = {"small": 0, "medium": 2, "large": 4}
 
 
-# Hard-coded sample log lines — purely cosmetic; replaced by real events
-# once the bot runtime is wired up.
-SAMPLE_LOG = [
-    "[02:51:12] 系統：正在驗證開卡資訊…",
-    "[02:51:12] 系統：驗證成功！到期日：2026-05-11 19:31:45",
-    "[02:51:12] 系統：資料版本已是最新 (20260410001)",
-    "[02:51:12] 成功連結：Login [9AHHSYB9KZ2R@plaync.com]",
-    "[02:51:12] 系統：地圖繪製模組啟動",
-    "[02:51:28] 系統：已載入設定檔：騎士.ini",
-    "[02:51:35] 保護執行中。",
-    "[02:51:35] 保護暫停中…等待回到前台",
-    "[02:51:52] 系統：腳本 [騎士-古洞2樓] 啟動。",
-    "[02:51:52] 系統：[腳本定位] 已在村莊，重置腳本。",
-]
+# Console log starts empty — real events get appended by GameMonitor
+# (connection state) and later by the bot runtime.
+SAMPLE_LOG: list[str] = []
+
+
+class LoadingOverlay(QtWidgets.QFrame):
+    """Semi-transparent veil shown during initial OCR model load + first
+    capture, so the user knows why HP/MP/LV are still '—' for ~10s.
+
+    Sized to cover the central widget; uses ``WA_TransparentForMouseEvents``
+    so the title bar buttons underneath still respond to clicks.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("loadingOverlay")
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setAlignment(QtCore.Qt.AlignCenter)
+        layout.setSpacing(10)
+
+        spinner = QtWidgets.QLabel("⧗")  # ⧗ hourglass
+        spinner.setObjectName("loadingIcon")
+        spinner.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(spinner)
+
+        self.message = QtWidgets.QLabel("讀取中…")
+        self.message.setObjectName("loadingText")
+        self.message.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.message)
+
+        self.detail = QtWidgets.QLabel("正在載入 OCR 模型 + 偵測遊戲畫面")
+        self.detail.setObjectName("loadingDetail")
+        self.detail.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.detail)
+
+        parent.installEventFilter(self)
+        self._reposition()
+
+    def set_message(self, message: str, detail: str | None = None) -> None:
+        self.message.setText(message)
+        if detail is not None:
+            self.detail.setText(detail)
+
+    def _reposition(self) -> None:
+        p = self.parentWidget()
+        if p is not None:
+            self.setGeometry(0, 0, p.width(), p.height())
+
+    def eventFilter(self, obj, event):
+        if obj is self.parentWidget() and event.type() == QtCore.QEvent.Resize:
+            self._reposition()
+        return super().eventFilter(obj, event)
 
 
 class TitleBar(QtWidgets.QFrame):
@@ -227,6 +269,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         v.addLayout(self._build_login_row())
         v.addLayout(self._build_config_row())
+        v.addWidget(self._build_levelexp_row())
         v.addWidget(self._build_progress_block())
         v.addLayout(self._build_function_grid())
         v.addWidget(self._build_stats_card())
@@ -243,6 +286,103 @@ class MainWindow(QtWidgets.QMainWindow):
         # against same-value no-ops prevents the ping-pong from looping.
         self.btn_afk.colorChanged.connect(self.btn_doll.set_checked_color)
         self.btn_doll.colorChanged.connect(self.btn_afk.set_checked_color)
+
+        # Loading veil — hidden once the first OCR pass succeeds.
+        self.loading = LoadingOverlay(central)
+        self.loading.raise_()
+
+        # Auto-attach to the game window (WGC capture + RapidOCR, fully
+        # read-only — no game-process touch). Pushes parsed values into
+        # the HP/MP bars and console log. Disable in settings if undesired.
+        self._wire_game_monitor()
+
+    # ------------------------------------------------------------------ game monitor
+
+    def _wire_game_monitor(self) -> None:
+        self.monitor = cap.GameMonitor(needle="Lineage")
+        self.monitor.hp_changed.connect(self._on_hp)
+        self.monitor.mp_changed.connect(self._on_mp)
+        self.monitor.level_changed.connect(self._on_level)
+        self.monitor.exp_changed.connect(self._on_exp)
+        self.monitor.account_changed.connect(self._on_account)
+        self.monitor.connection_changed.connect(self._on_connection)
+        self.monitor.window_size_wrong.connect(self._on_window_size_wrong)
+        self.monitor.poll_finished.connect(self._on_poll_finished)
+
+        self._game_log_initialised = False
+        # Defer start a beat so the window paints first; OCR model load
+        # adds ~1.5 s and we don't want that to delay the splash.
+        QtCore.QTimer.singleShot(150, self.monitor.start)
+
+    def _on_hp(self, cur: int, max_: int) -> None:
+        pct = int(cur / max_ * 100) if max_ else 0
+        self.prog_hp.set_values(left="HP", middle=f"{cur} / {max_}",
+                                right=f"{pct}%", percent=pct)
+
+    def _on_mp(self, cur: int, max_: int) -> None:
+        pct = int(cur / max_ * 100) if max_ else 0
+        self.prog_mp.set_values(left="MP", middle=f"{cur} / {max_}",
+                                right=f"{pct}%", percent=pct)
+
+    def _on_level(self, lv: str) -> None:
+        self.lv_value.setText(lv)
+
+    def _on_exp(self, pct_str: str) -> None:
+        # Display in both the level/exp badge row and the stats card so
+        # the eye picks up the same value in either glance area.
+        self.exp_value.setText(pct_str)
+        primary = self.stat_exp.findChild(QtWidgets.QLabel, "statPrimary")
+        if primary is not None:
+            primary.setText(pct_str)
+
+    def _on_account(self, account: str) -> None:
+        """Refresh login dropdown with the account id parsed from the game
+        window title (e.g. ``Lineage Classic - … - Login [XXX@plaync.com]``).
+        """
+        label = f"Login [{account}]"
+        # Drop any leftover placeholder and de-dup
+        existing = [self.login_combo.itemText(i) for i in range(self.login_combo.count())]
+        if label in existing:
+            self.login_combo.setCurrentText(label)
+            return
+        # Replace the (等待偵測…) placeholder if present, else just append.
+        for i, text in enumerate(existing):
+            if "等待" in text or text.startswith("Login [9AHHS"):
+                self.login_combo.removeItem(i)
+                break
+        self.login_combo.addItem(label)
+        self.login_combo.setCurrentText(label)
+
+    def _on_connection(self, ok: bool, msg: str) -> None:
+        # Append to console log as a system message; cleaner than a popup
+        # and matches the existing log aesthetic.
+        if not self._game_log_initialised:
+            self.log.clear()
+            self._game_log_initialised = True
+        marker = "🟢" if ok else "🔴"
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log.appendPlainText(f"[{ts}] {marker} {msg}")
+
+    def _on_poll_finished(self, latency_ms: float) -> None:
+        # Tooltip on the title bar gives a hint of capture/OCR cost
+        # without taking up real estate.
+        self.title_bar.setToolTip(f"上次擷取耗時 {latency_ms:.0f} ms")
+        # First successful poll → drop the loading veil.
+        if self.loading.isVisible():
+            self.loading.hide()
+
+    def _on_window_size_wrong(self, w: int, h: int) -> None:
+        """Game window detected but at the wrong client size — keep the
+        loading veil up with an actionable message until the user fixes it.
+        """
+        self.loading.set_message(
+            f"⚠ 遊戲視窗大小 {w}×{h}",
+            "請將遊戲調整為 1280×960（不要全螢幕 / 最大化）後即可恢復",
+        )
+        if not self.loading.isVisible():
+            self.loading.show()
+            self.loading.raise_()
 
     # ------------------------------------------------------------------ rows
 
@@ -268,9 +408,9 @@ class MainWindow(QtWidgets.QMainWindow):
         row.addWidget(self.skill_settings_btn)
 
         self.login_combo = QtWidgets.QComboBox()
-        self.login_combo.addItems([
-            "Login [9AHHSYB9KZ2R@plaync.com]",
-        ])
+        # Items get auto-populated from the live game window title once the
+        # GameMonitor connects. Show a placeholder until then.
+        self.login_combo.addItem("（等待偵測…）")
         row.addWidget(self.login_combo, stretch=1)
 
         self.refresh_btn = QtWidgets.QPushButton("↻")
@@ -300,30 +440,53 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return row
 
+    def _build_levelexp_row(self) -> QtWidgets.QWidget:
+        """LV + EXP badge row, sits above the HP/MP bars.
+
+        Two value labels plus dim text labels — gold for LV, light blue
+        for EXP, mirroring the colour code of the stats card so the eye
+        connects them. Values default to '—' until OCR reads them.
+        """
+        wrap = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(wrap)
+        h.setContentsMargins(2, 0, 2, 0)
+        h.setSpacing(6)
+
+        lv_lbl = QtWidgets.QLabel("LV")
+        lv_lbl.setObjectName("statHeadLabel")
+        h.addWidget(lv_lbl)
+        self.lv_value = QtWidgets.QLabel("—")
+        self.lv_value.setObjectName("lvValue")
+        h.addWidget(self.lv_value)
+
+        h.addStretch(1)
+
+        exp_lbl = QtWidgets.QLabel("EXP")
+        exp_lbl.setObjectName("statHeadLabel")
+        h.addWidget(exp_lbl)
+        self.exp_value = QtWidgets.QLabel("—")
+        self.exp_value.setObjectName("expValue")
+        h.addWidget(self.exp_value)
+
+        return wrap
+
     def _build_progress_block(self) -> QtWidgets.QWidget:
         wrap = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(wrap)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(8)
 
+        # Defaults are '?' rather than fake numbers so the user can tell
+        # at a glance that no real OCR / pixel-mask reading has landed
+        # yet. Replaced by GameMonitor signals.
         self.prog_hp = ProgressRow()
         self.prog_hp.bar.setObjectName("hpBar")
-        self.prog_hp.set_values(
-            left="HP",
-            middle="1850 / 2000",
-            right="92%",
-            percent=92,
-        )
+        self.prog_hp.set_values(left="HP", middle="?", right="?", percent=0)
         v.addWidget(self.prog_hp)
 
         self.prog_mp = ProgressRow()
         self.prog_mp.bar.setObjectName("mpBar")
-        self.prog_mp.set_values(
-            left="MP",
-            middle="320 / 500",
-            right="64%",
-            percent=64,
-        )
+        self.prog_mp.set_values(left="MP", middle="?", right="?", percent=0)
         v.addWidget(self.prog_mp)
 
         return wrap
@@ -426,23 +589,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.stat_exp = self._stat_row(
             icon="\U0001F4D6",
-            primary="0.0000%",
-            rate="0.0000% / H",
+            primary="?",
+            rate="?",
             tooltip="經驗值（累積 / 每小時）",
             primary_color="#7fb8e6",   # light blue
             rate_color="#5a87a8",
         )
         self.stat_gold = self._stat_row(
             icon="\U0001F4B0",
-            primary="0",
-            rate="0 / H",
+            primary="?",
+            rate="?",
             tooltip="金錢（累積 / 每小時）",
             primary_color="#e6c14a",   # warm gold
             rate_color="#a88f3a",
         )
         self.stat_time = self._stat_row(
             icon="⏱️",
-            primary="00:00:00",
+            primary="?",
             rate=None,
             tooltip="已運行時間",
             primary_color="#c4a577",   # light brown
@@ -591,9 +754,11 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------ window helpers
 
     def _center(self) -> None:
+        # Pinned to the LEFT edge of the available screen, vertically
+        # centred. Game window is expected to live to the right of us.
         screen = self.screen().availableGeometry()
-        x = screen.x() + (screen.width() - APP_SIZE[0]) // 2
-        y = screen.y() + (screen.height() - APP_SIZE[1]) // 2
+        x = screen.x() + 20
+        y = screen.y() + max(0, (screen.height() - APP_SIZE[1]) // 2)
         self.move(x, y)
 
     def _toggle_pin(self, checked: bool) -> None:

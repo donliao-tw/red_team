@@ -27,3 +27,10 @@ desktop.ini
 
 # ─── Claude Code local settings ───
 .claude/settings.local.json
+
+# ─── Throwaway capture / debug artefacts ───
+samples/
+_capture_*.png
+preview.png
+flasher/assets/arrow_down.png
+flasher/assets/check.png
