@@ -314,15 +314,46 @@ class MainWindow(QtWidgets.QMainWindow):
         # adds ~1.5 s and we don't want that to delay the splash.
         QtCore.QTimer.singleShot(150, self.monitor.start)
 
+    # Log every HP/MP swing of >= this many points. Stops 5Hz pixel-mask
+    # micro-jitter from drowning the log; still catches every meaningful
+    # damage / heal event.
+    _HP_LOG_THRESHOLD = 3
+    _last_logged_hp: int | None = None
+    _last_logged_mp: int | None = None
+
     def _on_hp(self, cur: int, max_: int) -> None:
         pct = int(cur / max_ * 100) if max_ else 0
         self.prog_hp.set_values(left="HP", middle=f"{cur} / {max_}",
                                 right=f"{pct}%", percent=pct)
 
+        prev = self._last_logged_hp
+        if prev is None or abs(cur - prev) >= self._HP_LOG_THRESHOLD:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H:%M:%S")
+            arrow = "↓" if prev is not None and cur < prev else (
+                "↑" if prev is not None and cur > prev else "·")
+            self.log.appendPlainText(
+                f"[{ts}] HP {arrow} {cur}/{max_} ({pct}%)"
+                + (f"  was {prev}" if prev is not None else "")
+            )
+            self._last_logged_hp = cur
+
     def _on_mp(self, cur: int, max_: int) -> None:
         pct = int(cur / max_ * 100) if max_ else 0
         self.prog_mp.set_values(left="MP", middle=f"{cur} / {max_}",
                                 right=f"{pct}%", percent=pct)
+
+        prev = self._last_logged_mp
+        if prev is None or abs(cur - prev) >= self._HP_LOG_THRESHOLD:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H:%M:%S")
+            arrow = "↓" if prev is not None and cur < prev else (
+                "↑" if prev is not None and cur > prev else "·")
+            self.log.appendPlainText(
+                f"[{ts}] MP {arrow} {cur}/{max_} ({pct}%)"
+                + (f"  was {prev}" if prev is not None else "")
+            )
+            self._last_logged_mp = cur
 
     def _on_level(self, lv: str) -> None:
         self.lv_value.setText(lv)
