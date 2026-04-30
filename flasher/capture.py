@@ -138,18 +138,16 @@ def grab_frame(needle: str = "Lineage", *, timeout: float = 3.0) -> Image.Image:
 # Hard-coded for 1920×1032 client area, Lineage Classic in maximized window.
 # Re-survey when running at a different resolution.
 ROI_1280x960 = {
-    # Calibrated for a 1280×960 game client (the supported size).
-    # Most elements are bottom-anchored — translated from the 1920×1032
-    # baseline by Y-shift = -72 and X-shift = -640 for right-anchored,
-    # halved for centred. Fine-tune after first real capture at this
-    # resolution.
-    "hp_text":     (380, 736, 550, 766),
-    "mp_text":     (660, 736, 820, 766),
-    "level_exp":   (50,  743, 220, 778),
-    "debuffs":     (50,  786, 220, 883),
-    "lawful":      (50,  883, 220, 918),
-    "chat_log":    (220, 788, 1000, 948),
-    "action_bar":  (1000, 728, 1280, 948),
+    # Calibrated against a real 1280×960 capture (frame is 1282×992
+    # because WGC includes the 1-px border + 31-px title bar).
+    # All coordinates are in *frame* space, not client space.
+    "hp_text":     (330, 788, 540, 825),    # "HP:308/308" white on red
+    "mp_text":     (680, 788, 880, 825),    # "MP:116/116" white on purple
+    "level_exp":   (15,  808, 290, 832),    # orange ribbon "LEV:28 79.1664%"
+    "debuffs":     (60,  848, 215, 928),    # 2x2 status icons + values
+    "lawful":      (60,  930, 270, 965),    # "Lawful  32767"
+    "chat_log":    (310, 808, 1080, 970),   # chat / system messages
+    "action_bar":  (1080, 770, 1282, 970),  # F1 tabs + 4×3 skill grid
 }
 
 
@@ -171,22 +169,45 @@ ROI_1920x1032 = {
 def parse_hpmp(text_lines: list[str]) -> tuple[int, int] | None:
     """Pull (current, max) from RapidOCR output of an HP/MP ROI.
 
-    The slash gets misread as '1' (e.g. "308/308" → ['308', '1308']).
-    We treat any prefix '1' on a value matching the current value's
-    digit count as the slash artefact.
+    OCR mis-reads the slash three different ways depending on font size:
+      * "308/308" → ['308', '1308']  (slash → '1' token-splits)
+      * "308/308" → ['HP:308/308']   (slash kept, regex finds two ints)
+      * "308/308" → ['HP:3087308']   (slash → '7' fuses into one token)
+
+    We handle all three.
     """
     import re
     nums = []
     for t in text_lines:
         for m in re.finditer(r"\d+", t):
-            nums.append(int(m.group()))
-    if len(nums) < 2:
-        return None
-    cur, raw_max = nums[0], nums[1]
-    s = str(raw_max)
-    if s.startswith("1") and len(s) == len(str(cur)) + 1:
-        raw_max = int(s[1:])
-    return cur, raw_max
+            nums.append(m.group())
+
+    if len(nums) >= 2:
+        cur, raw_max = int(nums[0]), int(nums[1])
+        s = str(raw_max)
+        # Slash misread as leading '1' (e.g. "308/308" → "1308")
+        if s.startswith("1") and len(s) == len(str(cur)) + 1:
+            raw_max = int(s[1:])
+        return cur, raw_max
+
+    if len(nums) == 1:
+        # Slash fused into a single token. Symmetric values are the
+        # common case (cur == max at full HP/MP), so split in halves.
+        s = nums[0]
+        n = len(s)
+        if n >= 3 and n % 2 == 1:
+            half = n // 2
+            try:
+                return int(s[:half]), int(s[half + 1:])  # skip the '7'/'1' middle
+            except ValueError:
+                return None
+        if n >= 2 and n % 2 == 0:
+            half = n // 2
+            try:
+                return int(s[:half]), int(s[half:])
+            except ValueError:
+                return None
+    return None
 
 
 # Lazy-loaded RapidOCR instance — heavy import (~1.5s + model load)
@@ -258,6 +279,16 @@ def parse_level_exp(text_lines: list[str]) -> tuple[str | None, str | None]:
             pct_idx = i - 1
             break
 
+    if exp is None:
+        # Direct decimal hit: `\d+\.\d+` covers cases where the trailing
+        # '%' got mis-OCR'd as '8' or dropped — joined output looks like
+        # 'EV:28 79.16648' rather than '79 1664%'.
+        joined = " ".join(text_lines)
+        m = re.search(r"(\d{1,2})\.(\d{2,5})", joined)
+        if m:
+            decimal = m.group(2)[:4]  # cap to 4 decimals to drop OCR's % artefact
+            exp = f"{m.group(1)}.{decimal}%"
+
     def _first_level(seq) -> str | None:
         for tok, _ in seq:
             if 1 <= len(tok) <= 2 and 1 < int(tok) < 100:
@@ -284,8 +315,8 @@ def parse_level_exp(text_lines: list[str]) -> tuple[str | None, str | None]:
 # 'rightmost matching column' algorithm correctly skips over the gap.
 HP_BAR_BOX_1920 = (570, 824, 825, 840)
 MP_BAR_BOX_1920 = (970, 824, 1225, 840)
-HP_BAR_BOX_1280 = (250, 752, 510, 768)
-MP_BAR_BOX_1280 = (650, 752, 905, 768)
+HP_BAR_BOX_1280 = (282, 796, 562, 820)
+MP_BAR_BOX_1280 = (688, 796, 937, 820)
 
 # Active boxes — flipped by GameMonitor on attach
 HP_BAR_BOX = HP_BAR_BOX_1920
