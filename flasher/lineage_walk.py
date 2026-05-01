@@ -28,9 +28,11 @@ from board_client import BoardClient
 from human_mouse import HumanMouse
 
 
-# Player screen position. Refined from y=380 → y=400 to make N/S
-# pitches symmetric (and matching standard 2:1 isometric tiles).
-PLAYER_XY: tuple[int, int] = (640, 400)
+# Player screen-space anchor — character's *feet* (where the click
+# direction is computed from), not the body centre. Refined from
+# (640, 400) (body) → (640, 410) (feet) to make N/S pitches symmetric
+# under the 2:1 isometric tile model.
+PLAYER_XY: tuple[int, int] = (640, 410)
 
 # Per-tile pixel pitch in screen space. 2:1 isometric ratio.
 TILE_X: int = 50
@@ -39,27 +41,42 @@ TILE_Y: int = 26
 # Time the character takes to walk one tile (empirically ~0.8 s).
 WALK_S_PER_TILE: float = 0.8
 
-# Direction → (dx_tiles, dy_tiles) where +y is south, +x is east.
-DIRECTIONS: dict[str, tuple[int, int]] = {
-    "N":  (0, -1),
-    "S":  (0, +1),
-    "E":  (+1, 0),
-    "W":  (-1, 0),
-    "NE": (+1, -1),
-    "NW": (-1, -1),
-    "SE": (+1, +1),
-    "SW": (-1, +1),
+# Direction → screen-pixel offset for *one tile* in that direction.
+# Cardinal directions move along screen axes (N/S vertical, E/W
+# horizontal). Diagonals use the isometric NE/SE/NW/SW axes which are
+# **not** 45° in screen space — for a 2:1 diamond, the NE-axis sits at
+# atan2(-13, 25) ≈ -27.5° from horizontal, not -45°. Clicking at a
+# 45° screen angle results in mixed walking (e.g. "north 2 tiles
+# then north-west") because the click target falls between the NE
+# and N axes; the game resolves it as nearest-axis movement and
+# changes direction partway.
+# Diagonals: NE/NW use TILE_Y/2 = 13, but SE/SW use 11. Empirically the
+# south-pointing diagonals need a slightly LESS steep Y offset to land
+# on the isometric SE/SW axes — clicks at the symmetric +13 angle land
+# slightly south of the SE-axis and Lineage resolves them as "south
+# then south-east" in two legs. Biasing the click toward the E/W axis
+# (smaller |dy|) makes the angle round to SE/SW cleanly.
+TILE_PITCH: dict[str, tuple[int, int]] = {
+    "N":  (0, -TILE_Y),
+    "S":  (0, +TILE_Y),
+    "E":  (+TILE_X, 0),
+    "W":  (-TILE_X, 0),
+    "NE": (+TILE_X // 2, -13),
+    "NW": (-TILE_X // 2, -13),
+    "SE": (+TILE_X // 2, +11),
+    "SW": (-TILE_X // 2, +11),
 }
+
+# Backward-compat alias used by older tests.
+DIRECTIONS = TILE_PITCH
 
 
 def tile_offset_to_pixel(direction: str, n_tiles: int) -> tuple[int, int]:
     """Pixel target n_tiles in `direction` from PLAYER_XY (game coords)."""
-    if direction not in DIRECTIONS:
+    if direction not in TILE_PITCH:
         raise ValueError(f"unknown direction {direction!r}")
-    dx_t, dy_t = DIRECTIONS[direction]
-    px = PLAYER_XY[0] + dx_t * n_tiles * TILE_X
-    py = PLAYER_XY[1] + dy_t * n_tiles * TILE_Y
-    return px, py
+    dx_per, dy_per = TILE_PITCH[direction]
+    return PLAYER_XY[0] + dx_per * n_tiles, PLAYER_XY[1] + dy_per * n_tiles
 
 
 def walk(mouse: HumanMouse, direction: str, n_tiles: int,
