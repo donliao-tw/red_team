@@ -166,33 +166,31 @@ def parse_lawful(text: str) -> Optional[int]:
 def classify_time_of_day(crop_arr: np.ndarray) -> Optional[str]:
     """Return 'day', 'night' or None for the in-game sundial.
 
-    The time bar in the status panel is a horizontal sundial: a long
-    bar (~200 px wide at 1280×960) whose left half is dark blue (night)
-    and right half lightens toward white (day). A pale-yellow moon
-    cursor (~RGB 242,226,118) glides left-to-right as game time passes.
+    The time bar is a horizontal sundial: a ~200 px wide gradient
+    (left=dark blue night, right=light day) with a pale-yellow moon
+    cursor (~RGB 242,226,118) gliding left-to-right as game time
+    passes. Empirically the dark-to-light transition happens around
+    65 % of the bar width — values up to that are "still night",
+    past it the sky is bright enough to be "day".
 
-    Strategy: find the cursor's centroid x position within the crop;
-    if it sits in the left half of the bar → night, right half → day.
-    Returns None when the cursor isn't found (cursor outside ROI, or
-    the bar is in a transition state we haven't sampled yet).
+    A 5 % deadzone around the boundary returns None (panel keeps the
+    last confirmed state) so dawn/dusk doesn't make the icon flicker.
     """
     R = crop_arr[..., 0].astype(int)
     G = crop_arr[..., 1].astype(int)
     B = crop_arr[..., 2].astype(int)
-    # Cream-yellow cursor: R/G high, B clearly lower.
     cursor = (R > 220) & (G > 200) & (B < 150) & ((R - B) > 70)
     ys, xs = np.where(cursor)
-    if len(xs) < 6:  # too few hits — cursor probably not in ROI
+    if len(xs) < 6:
         return None
     cx = float(xs.mean())
     width = crop_arr.shape[1]
-    # Bar midpoint splits day/night. We pad a small dead-zone in the
-    # middle to avoid flicker around dawn/dusk.
-    midpoint = width / 2
-    deadzone = width * 0.05  # ±5 % of width
-    if cx < midpoint - deadzone:
+    pct = cx / width
+    NIGHT_DAY_BOUNDARY = 0.65
+    DEADZONE = 0.05
+    if pct < NIGHT_DAY_BOUNDARY - DEADZONE:
         return "night"
-    if cx > midpoint + deadzone:
+    if pct > NIGHT_DAY_BOUNDARY + DEADZONE:
         return "day"
     return None
 
