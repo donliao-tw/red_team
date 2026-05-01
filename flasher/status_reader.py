@@ -164,30 +164,36 @@ def parse_lawful(text: str) -> Optional[int]:
 
 
 def classify_time_of_day(crop_arr: np.ndarray) -> Optional[str]:
-    """Return 'day', 'night' or None.
+    """Return 'day', 'night' or None for the in-game sundial.
 
-    The time row in the status panel shows a sun + moon icon side by
-    side; the active one is brightly saturated, the inactive one is
-    dim. We count yellow-saturated pixels. When the sun is active the
-    yellow ratio crosses ~0.08; when the moon is active (sun greyed
-    out), yellow drops near zero.
+    The time bar in the status panel is a horizontal sundial: a long
+    bar (~200 px wide at 1280×960) whose left half is dark blue (night)
+    and right half lightens toward white (day). A pale-yellow moon
+    cursor (~RGB 242,226,118) glides left-to-right as game time passes.
 
-    Threshold tuning is conservative until a real night sample is
-    captured. In the in-between band we return None and the panel
-    keeps the last confirmed state.
+    Strategy: find the cursor's centroid x position within the crop;
+    if it sits in the left half of the bar → night, right half → day.
+    Returns None when the cursor isn't found (cursor outside ROI, or
+    the bar is in a transition state we haven't sampled yet).
     """
     R = crop_arr[..., 0].astype(int)
     G = crop_arr[..., 1].astype(int)
     B = crop_arr[..., 2].astype(int)
-    yellow = (R > 180) & (G > 140) & (B < 120)
-    total = crop_arr.shape[0] * crop_arr.shape[1]
-    if total == 0:
+    # Cream-yellow cursor: R/G high, B clearly lower.
+    cursor = (R > 220) & (G > 200) & (B < 150) & ((R - B) > 70)
+    ys, xs = np.where(cursor)
+    if len(xs) < 6:  # too few hits — cursor probably not in ROI
         return None
-    ratio = float(yellow.sum()) / total
-    if ratio > 0.08:
-        return "day"
-    if ratio < 0.005:
+    cx = float(xs.mean())
+    width = crop_arr.shape[1]
+    # Bar midpoint splits day/night. We pad a small dead-zone in the
+    # middle to avoid flicker around dawn/dusk.
+    midpoint = width / 2
+    deadzone = width * 0.05  # ±5 % of width
+    if cx < midpoint - deadzone:
         return "night"
+    if cx > midpoint + deadzone:
+        return "day"
     return None
 
 

@@ -155,8 +155,10 @@ ROI_1280x960 = {
     "mdef":        (137, 848, 215, 888),    # top-right:   [icon] N%
     "weight":      (60,  888, 137, 928),    # bottom-left: [icon] N%
     "hunger":      (137, 888, 215, 928),    # bottom-right (orange): [icon] N%
-    # Sun/moon time icon row, just below Lawful.
-    "time_icon":   (40,  965, 100, 990),
+    # Sundial time bar, just below Lawful. Spans most of the bottom
+    # row of the left UI pane — the cream-yellow cursor moves L→R
+    # as game time advances. Left half = night, right half = day.
+    "time_icon":   (72,  965, 270, 985),
 }
 
 
