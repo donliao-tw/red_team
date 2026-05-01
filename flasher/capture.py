@@ -148,6 +148,15 @@ ROI_1280x960 = {
     "lawful":      (60,  930, 270, 965),    # "Lawful  32767"
     "chat_log":    (310, 808, 1080, 970),   # chat / system messages
     "action_bar":  (1080, 770, 1282, 970),  # F1 tabs + 4×3 skill grid
+    # Status sub-cells split out of `debuffs` (155×80, 2×2) so each
+    # field has its own tight ROI for OCR. Coordinates are absolute
+    # in frame space, not relative to the parent debuffs box.
+    "defense":     (60,  848, 137, 888),    # top-left:    [icon] N
+    "mdef":        (137, 848, 215, 888),    # top-right:   [icon] N%
+    "weight":      (60,  888, 137, 928),    # bottom-left: [icon] N%
+    "hunger":      (137, 888, 215, 928),    # bottom-right (orange): [icon] N%
+    # Sun/moon time icon row, just below Lawful.
+    "time_icon":   (40,  965, 100, 990),
 }
 
 
@@ -493,6 +502,11 @@ class GameMonitor:
             level_changed = QtCore.Signal(str)
             exp_changed = QtCore.Signal(str)
             lawful_changed = QtCore.Signal(int)
+            defense_changed = QtCore.Signal(int)
+            mdef_changed = QtCore.Signal(int)            # percent
+            weight_changed = QtCore.Signal(int)          # percent
+            hunger_changed = QtCore.Signal(int)          # percent
+            time_changed = QtCore.Signal(str)            # "day" | "night"
             account_changed = QtCore.Signal(str)         # account id from window title
             connection_changed = QtCore.Signal(bool, str)  # (online, message)
             window_size_wrong = QtCore.Signal(int, int)  # actual (w, h) when mismatched
@@ -505,6 +519,11 @@ class GameMonitor:
         self.level_changed = self._sig.level_changed
         self.exp_changed = self._sig.exp_changed
         self.lawful_changed = self._sig.lawful_changed
+        self.defense_changed = self._sig.defense_changed
+        self.mdef_changed = self._sig.mdef_changed
+        self.weight_changed = self._sig.weight_changed
+        self.hunger_changed = self._sig.hunger_changed
+        self.time_changed = self._sig.time_changed
         self.account_changed = self._sig.account_changed
         self.connection_changed = self._sig.connection_changed
         self.window_size_wrong = self._sig.window_size_wrong
@@ -529,14 +548,23 @@ class GameMonitor:
         self._mp_max: int | None = None
 
         # The fast loop reads HP/MP via template match (sub-ms). The
-        # slow loop OCRs the rest — chat ROI is dropped (no actionable
-        # data) and hp/mp text are owned by the fast loop.
+        # slow loop OCRs the rest. Drop chat (no bot signal) and HP/MP
+        # (owned by fast loop). Drop the parent `debuffs` ROI too since
+        # we OCR each of its 4 sub-cells (defense / mdef / weight /
+        # hunger) individually for higher reliability.
         self._poll_rois = {
             k: v for k, v in ROI_1920x1032.items()
-            if k not in ("chat_log", "hp_text", "mp_text")
+            if k not in ("chat_log", "hp_text", "mp_text", "debuffs")
         }
         self._hp_box = ROI_1920x1032["hp_text"]
         self._mp_box = ROI_1920x1032["mp_text"]
+        self._time_icon_box = ROI_1920x1032.get("time_icon")
+
+        # Per-field OCR + agreement + bitmap-cache readers for the
+        # status zone. These don't run RapidOCR themselves — they take
+        # the OCR text we already produced and validate / cache.
+        from status_reader import make_default_readers
+        self._field_readers = make_default_readers()
 
     def start(self) -> None:
         # Force OCR model init on the main thread *before* any worker
@@ -601,10 +629,11 @@ class GameMonitor:
             if src is not None:
                 self._poll_rois = {
                     k: v for k, v in src.items()
-                    if k not in ("chat_log", "hp_text", "mp_text")
+                    if k not in ("chat_log", "hp_text", "mp_text", "debuffs")
                 }
                 self._hp_box = src["hp_text"]
                 self._mp_box = src["mp_text"]
+                self._time_icon_box = src.get("time_icon")
             if src is None:
                 self.window_size_wrong.emit(*size)
                 self._set_connection(
@@ -676,8 +705,8 @@ class GameMonitor:
                 if img is None:
                     return
 
-            # HP/MP are read by the fast loop via template match; only
-            # OCR the slow set (level_exp / lawful / debuffs / action_bar).
+            # HP/MP are read by the fast loop via template match. The
+            # slow loop OCRs LV/EXP, the 4 status sub-cells, and Lawful.
             ocr = ocr_rois(img, self._poll_rois)
 
             lv, exp = parse_level_exp(ocr.get("level_exp", []))
@@ -686,10 +715,34 @@ class GameMonitor:
             if exp:
                 self.exp_changed.emit(exp)
 
-            joined_lf = " ".join(ocr.get("lawful", []))
-            m_lf = re.search(r"(-?\d{4,5})", joined_lf)
-            if m_lf:
-                self.lawful_changed.emit(int(m_lf.group(1)))
+            # Status zone: feed each field's OCR text into its
+            # FieldReader (which validates + agreement-confirms +
+            # bitmap-caches). Emit signal only if the reader has a
+            # confirmed value.
+            import numpy as np
+            for field, signal in (
+                ("defense", self.defense_changed),
+                ("mdef",    self.mdef_changed),
+                ("weight",  self.weight_changed),
+                ("hunger",  self.hunger_changed),
+                ("lawful",  self.lawful_changed),
+            ):
+                if field not in self._poll_rois:
+                    continue
+                text = " ".join(ocr.get(field, []))
+                box = self._poll_rois[field]
+                crop_arr = np.asarray(img.crop(box))
+                v = self._field_readers[field].read(crop_arr, text)
+                if v is not None:
+                    signal.emit(v)
+
+            # Time of day — separate path (icon, not OCR).
+            if self._time_icon_box is not None:
+                from status_reader import classify_time_of_day
+                arr = np.asarray(img.crop(self._time_icon_box))
+                tod = classify_time_of_day(arr)
+                if tod is not None:
+                    self.time_changed.emit(tod)
 
         except Exception as e:  # noqa: BLE001
             self._set_connection(False, f"錯誤: {type(e).__name__}: {e}")

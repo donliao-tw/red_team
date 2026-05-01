@@ -271,6 +271,7 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addLayout(self._build_config_row())
         v.addWidget(self._build_levelexp_row())
         v.addWidget(self._build_progress_block())
+        v.addWidget(self._build_status_row())
         v.addLayout(self._build_function_grid())
         v.addWidget(self._build_stats_card())
         v.addWidget(self._build_log(), stretch=1)
@@ -304,6 +305,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.monitor.mp_changed.connect(self._on_mp)
         self.monitor.level_changed.connect(self._on_level)
         self.monitor.exp_changed.connect(self._on_exp)
+        self.monitor.lawful_changed.connect(self._on_lawful)
+        self.monitor.defense_changed.connect(self._on_defense)
+        self.monitor.mdef_changed.connect(self._on_mdef)
+        self.monitor.weight_changed.connect(self._on_weight)
+        self.monitor.hunger_changed.connect(self._on_hunger)
+        self.monitor.time_changed.connect(self._on_time)
         self.monitor.account_changed.connect(self._on_account)
         self.monitor.connection_changed.connect(self._on_connection)
         self.monitor.window_size_wrong.connect(self._on_window_size_wrong)
@@ -365,6 +372,53 @@ class MainWindow(QtWidgets.QMainWindow):
         primary = self.stat_exp.findChild(QtWidgets.QLabel, "statPrimary")
         if primary is not None:
             primary.setText(pct_str)
+
+    # ── status row slots ────────────────────────────────────────────
+    # These come from GameMonitor's slow-loop FieldReaders, which only
+    # emit after N consecutive identical OCR reads. So when a slot
+    # fires, the value is already confirmed.
+
+    def _on_weight(self, pct: int) -> None:
+        self.lbl_weight.setText(f"\U0001F392 {pct}%")
+        # Style hint: heavy load nears the 80% drop-below-100 cliff.
+        self.lbl_weight.setProperty("alert", pct >= 80)
+        self.lbl_weight.style().unpolish(self.lbl_weight)
+        self.lbl_weight.style().polish(self.lbl_weight)
+
+    def _on_lawful(self, value: int) -> None:
+        self.lbl_lawful.setText(f"⚖️ {value}")
+        # Negative Lawful flips bot behaviour — flag visually.
+        self.lbl_lawful.setProperty("alert", value < 0)
+        self.lbl_lawful.style().unpolish(self.lbl_lawful)
+        self.lbl_lawful.style().polish(self.lbl_lawful)
+
+    def _on_time(self, mode: str) -> None:
+        # Just the icon — sun for day, moon for night. The icon IS the
+        # value; no extra text needed.
+        self.lbl_time.setText("🌙" if mode == "night" else "☀️")
+        self.lbl_time.setProperty("alert", mode == "night")
+        self.lbl_time.style().unpolish(self.lbl_time)
+        self.lbl_time.style().polish(self.lbl_time)
+
+    def _on_defense(self, v: int) -> None:
+        self._status_extra["defense"] = str(v)
+        self._refresh_status_info_tooltip()
+
+    def _on_mdef(self, pct: int) -> None:
+        self._status_extra["mdef"] = f"{pct}%"
+        self._refresh_status_info_tooltip()
+
+    def _on_hunger(self, pct: int) -> None:
+        self._status_extra["hunger"] = f"{pct}%"
+        self._refresh_status_info_tooltip()
+
+    def _refresh_status_info_tooltip(self) -> None:
+        d = self._status_extra
+        self.status_info_btn.setToolTip(
+            f"防禦: {d['defense']}\n"
+            f"魔防: {d['mdef']}\n"
+            f"飽食度: {d['hunger']}"
+        )
 
     def _on_account(self, account: str) -> None:
         """Refresh login dropdown with the account id parsed from the game
@@ -519,6 +573,51 @@ class MainWindow(QtWidgets.QMainWindow):
         self.prog_mp.bar.setObjectName("mpBar")
         self.prog_mp.set_values(left="MP", middle="?", right="?", percent=0)
         v.addWidget(self.prog_mp)
+
+        return wrap
+
+    # ────────────────────────────── status row ──────────────────────────────
+    # Three primary fields shown directly: 負重 (weight), 相性 (Lawful),
+    # 時間 (sun/moon). Three less-important fields (defense / mdef /
+    # hunger) live behind an info icon's tooltip — they update via
+    # the same GameMonitor signals but only surface on hover.
+
+    def _build_status_row(self) -> QtWidgets.QWidget:
+        wrap = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(wrap)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(10)
+
+        def cell(icon: str, init: str, key: str) -> QtWidgets.QLabel:
+            text = f"{icon} {init}".strip()
+            lbl = QtWidgets.QLabel(text)
+            lbl.setObjectName("statusBadge")
+            lbl.setProperty("statusKey", key)
+            lbl.setToolTip("")  # filled in by slots
+            return lbl
+
+        self.lbl_weight = cell("\U0001F392", "--%", "weight")   # 🎒 backpack
+        self.lbl_lawful = cell("⚖️", "--", "lawful")            # ⚖ scales
+        # Time icon is just the emoji — sun (day) by default, swaps to
+        # moon when night is detected. No "?" placeholder; the icon is
+        # the value.
+        self.lbl_time   = cell("☀️", "", "time")
+
+        h.addWidget(self.lbl_weight, stretch=3)
+        h.addWidget(self.lbl_lawful, stretch=3)
+        h.addWidget(self.lbl_time,   stretch=2)
+
+        # Status info button — hover to see the de-prioritised fields.
+        self.status_info_btn = QtWidgets.QPushButton("ⓘ")  # ⓘ
+        self.status_info_btn.setObjectName("statusInfo")
+        self.status_info_btn.setFixedSize(32, 28)
+        self.status_info_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.status_info_btn.setToolTip("防禦: ?\n魔防: ?%\n飽食度: ?%")
+        self.status_info_btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        h.addWidget(self.status_info_btn)
+
+        # Backing state for the info-button tooltip.
+        self._status_extra = {"defense": "?", "mdef": "?", "hunger": "?"}
 
         return wrap
 

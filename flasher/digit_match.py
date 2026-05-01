@@ -35,6 +35,7 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
 
 def load_templates() -> dict[str, np.ndarray]:
+    """HP/MP bar text templates (10×10 binary, fixed-grid)."""
     out = {}
     for f in sorted(TEMPLATE_DIR.glob("glyph_*.png")):
         name = f.stem.replace("glyph_", "")
@@ -45,6 +46,8 @@ def load_templates() -> dict[str, np.ndarray]:
         arr = np.asarray(Image.open(f).convert("L")) > 127
         out[name] = arr
     return out
+
+
 
 
 def hp_text_mask(arr: np.ndarray) -> np.ndarray:
@@ -160,3 +163,11 @@ def read_hp(crop_arr: np.ndarray, templates: dict[str, np.ndarray]
 def read_mp(crop_arr: np.ndarray, templates: dict[str, np.ndarray]
             ) -> tuple[int, int] | None:
     return read_bar_text(crop_arr, templates, mp=True)
+
+
+# Status-zone readers (defense / mdef / weight / hunger / lawful + time
+# of day) live in flasher/status_reader.py — they use OCR + agreement
+# validation + a bitmap-hash cache instead of the fixed-grid template
+# match used here, because the status zone has variable-width digits,
+# decorative borders and multiple sub-cells with different alignments
+# that a single grid policy can't handle reliably.

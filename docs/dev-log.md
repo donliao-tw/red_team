@@ -5,6 +5,93 @@ Newest entries on top.
 
 ---
 
+## 2026-05-01 — Status row: 6 fields surfaced via OCR + agreement validation
+
+### What got added
+
+The main panel now shows a new row between HP/MP and the function
+toggles, plus a hover tooltip behind a `ⓘ` icon:
+
+| Field        | Where          | Source |
+|---           |---             |---     |
+| 負重 weight  | row, badge     | OCR + FieldReader |
+| 相性 Lawful  | row, badge     | OCR + FieldReader |
+| 時間 day/night | row, emoji   | HSV yellow-ratio classifier |
+| 防禦 defense | tooltip        | OCR + FieldReader |
+| 魔防 mdef    | tooltip        | OCR + FieldReader |
+| 飽食度 hunger | tooltip       | OCR + FieldReader |
+
+### Why not template match
+
+The HP/MP fixed-grid template match doesn't fit the status zone:
+
+* Variable-width digits, variable inter-digit gaps (no single GAP_MIN
+  works — too small fragments "9", too big fuses "32767").
+* Decorative gold border around Lawful gets caught by any bright mask.
+* Orange-highlighted hunger cell has different background statistics.
+* Multiple sub-cells with different alignments inside the 2×2 debuffs grid.
+
+After spending several hours fighting the segmentation, the user
+pointed out that **most of these fields almost never change**, so we
+don't need streaming-perfect recognition. That reframes the problem:
+
+### Design — `flasher/status_reader.py`
+
+`FieldReader` per field, three layers:
+
+1. **Bitmap-hash cache** (`blake2b` of the achromatic-bright mask) —
+   same value renders to the same bitmap, so a cache hit is 100%
+   reliable and ~free. Cache populates as new values are seen.
+2. **First-parse emit** — on cache miss, run the field's parser
+   against RapidOCR's text. If it parses, return the value
+   immediately so the GUI doesn't sit on placeholders for 15 s.
+3. **Agreement → cache** — only after `agreement` (default 3)
+   consecutive identical reads do we write `(hash → value)` to the
+   cache. Until then the value is "tentative" but still shown.
+
+Per-field parsers add range validation:
+`parse_int(0..999)`, `parse_percent(0..200)`, `parse_lawful(-32768..32767)`.
+
+Time of day is a separate path — `classify_time_of_day()` counts
+yellow-saturated pixels; sun is bright yellow (active day), moon
+is dim. Returns `'day'` / `'night'` / `None` (uncertain).
+
+### Wiring
+
+* `flasher/capture.py`:
+  * `ROI_1280x960` adds `defense / mdef / weight / hunger / time_icon`
+    sub-ROIs split out of the parent `debuffs` box.
+  * `GameMonitor` adds 5 new signals (`defense_changed` etc.); the
+    existing `lawful_changed` swaps source from regex-on-OCR to a
+    `FieldReader`.
+  * `_slow_worker()` (5 s loop) crops each sub-ROI, feeds OCR text
+    into the field's reader, emits when a value lands.
+  * The parent `debuffs` ROI is dropped from the OCR set since the
+    sub-cells own its area now.
+* `flasher/main.py`:
+  * `_build_status_row()` — three badges + an `ⓘ` info button.
+    Inserted between `_build_progress_block()` (HP/MP) and
+    `_build_function_grid()`.
+  * Slots: `_on_weight / _on_lawful / _on_time` drive the badges;
+    `_on_defense / _on_mdef / _on_hunger` rebuild the `ⓘ` tooltip.
+  * Time badge is emoji-only (☀️ default, swaps to 🌙) — no "?"
+    placeholder per user feedback.
+
+### Known limitations (phase B)
+
+* **Lawful magnitude**: RapidOCR systematically misread the trailing
+  '7' as '0' on the captured frame ('32767' → '32760'). Sign is
+  preserved (the ✔ requirement for "is it negative?"). For exact
+  magnitude we'd need template-match digits — deferred.
+* **Time threshold**: only a night-time (moon) sample was captured
+  during this session. Day threshold is conservative; the
+  classifier will return `None` until a day-time sample tunes it.
+* The earlier template-match exploration produced
+  `flasher/templates/status_*.png` and `extract_status_templates.py`
+  — both deleted from this branch since the OCR path supersedes them.
+
+---
+
 ## 2026-04-30 (late) — HP/MP read: template match replaces OCR + pixel mask
 
 ### Symptom
