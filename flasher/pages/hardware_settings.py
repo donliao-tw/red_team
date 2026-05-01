@@ -9,6 +9,7 @@ import serial
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import board as board_module
+import board_client
 import flash
 import profiles
 import style
@@ -179,21 +180,68 @@ class HardwareSettingsPage(Page):
             self._append_log("沒有偵測到任何 USB 序列裝置。")
             return
 
-        for b in self._boards:
-            self.board_combo.addItem(b.label)
-
-        # Prefer a known ATmega32U4 board.
+        # Ping every visible port — VID/PID is spoofed (Logitech /
+        # Razer / MS) so KNOWN_BOARDS doesn't match the runtime
+        # firmware. The hid_mouse board is whichever port responds
+        # with "pong" + a "hid_mouse v..." version string.
+        hid_mouse_idx: int | None = None
+        version_by_idx: dict[int, str] = {}
         for i, b in enumerate(self._boards):
-            if b.known is not None:
-                self.board_combo.setCurrentIndex(i)
-                break
+            v = self._ping_one(b.port)
+            if v:
+                version_by_idx[i] = v
+                if hid_mouse_idx is None:
+                    hid_mouse_idx = i
+
+        for i, b in enumerate(self._boards):
+            label = b.label
+            if i in version_by_idx:
+                label += f"  ✅ {version_by_idx[i]}"
+            self.board_combo.addItem(label)
+
+        # Auto-select: a flashed hid_mouse board first; failing that,
+        # any KNOWN_BOARDS entry (only matches if the board is in
+        # bootloader / unflashed state).
+        if hid_mouse_idx is not None:
+            self.board_combo.setCurrentIndex(hid_mouse_idx)
+        else:
+            for i, b in enumerate(self._boards):
+                if b.known is not None:
+                    self.board_combo.setCurrentIndex(i)
+                    break
 
         chosen = self._selected_board()
-        if chosen and chosen.known is not None:
-            self.app.set_status(f"連接 {chosen.port}", ok=True)
+        if chosen and self.board_combo.currentIndex() in version_by_idx:
+            self.app.set_status(
+                f"已連接 hid_mouse @ {chosen.port}", ok=True,
+            )
+        elif chosen and chosen.known is not None:
+            self.app.set_status(
+                f"未燒錄板子 @ {chosen.port}（請先燒錄）", ok=None,
+            )
         else:
-            self.app.set_status("非已知板子", ok=None)
-        self._append_log(f"偵測到 {len(self._boards)} 個裝置")
+            self.app.set_status("找不到 hid_mouse 板", ok=False)
+        self._append_log(
+            f"偵測到 {len(self._boards)} 個裝置，"
+            f"{len(version_by_idx)} 個是已燒錄的 hid_mouse"
+        )
+
+    @staticmethod
+    def _ping_one(port: str) -> str | None:
+        """Open the port, ping, return the firmware version string, or
+        None on failure. Quick (~120 ms / port) — drains right after."""
+        try:
+            client = board_client.BoardClient(port, timeout_s=0.3)
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            if not client.ping():
+                return None
+            return client.version()
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            client.close()
 
     # ------------------------------------------------------------------ actions
 

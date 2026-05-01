@@ -5,6 +5,134 @@ Newest entries on top.
 
 ---
 
+## 2026-05-02 — Bot output path: hid_mouse firmware v0.4 + walk primitive
+
+The whole "panel can drive the game" stack: firmware that produces real
+HID reports indistinguishable from a consumer mouse + keyboard, panel
+code that smooth-moves the cursor on bezier paths, and a calibrated
+`walk(direction, n_tiles)` primitive that maps tile movements to
+pixel-space clicks for Lineage Classic's isometric grid.
+
+### Firmware journey (v0.1 → v0.4)
+
+1. **v0.1** — `AbsoluteMouse.moveTo(x, y)` with x,y in 0..32767.
+   Cursor only landed in the bottom-right quadrant of the screen
+   because HID-Project's descriptor uses a -32768..32767 *signed*
+   range internally.
+2. **v0.2** — added composite `BootKeyboard` so we can press Tab,
+   F-keys, etc. The protocol gained `K name`, `KD name`, `KU name`
+   commands. Tab confirmed working in-game.
+3. **v0.3** — fixed the absolute-coord half-screen bug by translating
+   incoming 0..32767 to signed -32768..32767 before calling
+   `AbsoluteMouse.moveTo`. Cursor now lands precisely (±1 px) at any
+   game-coord target.
+4. **v0.4** — Lineage filters HID Absolute Pointer reports for hover
+   tooltips (the cursor moved correctly but tooltips never rendered).
+   Switched to relative-delta `Mouse` class. Protocol's `M x y`
+   replaced by `MR dx dy` (delta clamped to ±127, panel chunks longer
+   moves). All button events still go through the standard mouse
+   path. **Tooltip events now fire as expected.**
+
+The flash-on-demand GUI (`pages/hardware_settings.py`) now pings each
+visible USB COM port to find the spoofed-VID/PID hid_mouse board (the
+old VID/PID-based detection always failed because we spoof Logitech),
+auto-selects it in the dropdown, and labels it `✅ hid_mouse v<n>`.
+
+### Panel-side architecture
+
+- [flasher/board_client.py](../flasher/board_client.py) — wire
+  protocol client. `BoardClient` exposes `move_relative(dx, dy)`
+  (auto-chunks to ±127 segments), `click()` / `right_click()` /
+  `press()` / `release()`, `key_tap(name)` / `key_down(name)` /
+  `key_up(name)` / `key_combo(modifier, key)`. Auto-detects the
+  board by pinging every visible COM port (since VID/PID is spoofed,
+  we can't filter on identity).
+- [flasher/window_mapper.py](../flasher/window_mapper.py) —
+  game→screen coordinate conversions via Win32 (`ClientToScreen`,
+  `GetCursorPos`, virtual-screen rect). Also owns the
+  `MouseAccelerationOff` context manager, which toggles the
+  system-wide "Enhance pointer precision" off via `SystemParametersInfo`
+  for the duration of bot input (linearises deltas so the cursor
+  doesn't overshoot).
+- [flasher/human_mouse.py](../flasher/human_mouse.py) — `HumanMouse`
+  wraps `BoardClient` with bezier-curve paths, ease-in-out velocity,
+  sub-pixel jitter, and Fitts-law-style duration. Bezier is computed
+  in screen-pixel space; deltas are sent against the previous *planned*
+  position (not GetCursorPos), with a single corrective settle at the
+  end of each move. Earlier the per-step re-read produced visible
+  zigzag; the planned-deltas approach makes the path look properly
+  smooth.
+
+### Lineage walk calibration
+
+[flasher/lineage_walk.py](../flasher/lineage_walk.py)
+
+```
+PLAYER_XY = (640, 400)   # player's *screen* position; world scrolls,
+                         # player stays here
+TILE_X    = 50           # screen px per tile, E/W direction
+TILE_Y    = 26           # screen px per tile, N/S direction
+                         # (2:1 ratio = standard isometric)
+```
+
+Calibration data:
+* Click 100 px in each cardinal direction from `PLAYER_XY`
+* N: walked ~5 tiles, S: ~3 tiles, E: ~2 tiles, W: ~2 tiles
+* The N/S asymmetry resolved when we shifted PLAYER_XY from the
+  literal screen centre (640, 480) to (640, 400) — the player on
+  Lineage's UI sits above the chrome strip at the bottom of the
+  game window, not at the geometric centre.
+
+`walk(direction, n_tiles)`:
+* Computes target = PLAYER_XY + n_tiles × tile_offset[direction]
+* Clicks via HumanMouse (smooth bezier with Pointer Precision off)
+* Sleeps `wait_per_tile × n_tiles + settle` for the walk to complete
+
+Verified live: `walk("N", 3)` → `walk("S", 3)` → `walk("E", 3)` →
+`walk("W", 3)` returns the character to within ~1 tile of start.
+
+### Gold-read end-to-end
+
+`flasher/gold_read_test.py` runs the full pipeline and was the live
+validation for the firmware journey:
+
+1. `SetForegroundWindow(lineage)` — required so the Tab key reaches
+   the game.
+2. Detect inventory open: count yellow-gold pixels in slot 1's
+   frame-space zone. >= 100 px = visible. Closed inventory = 0 px.
+3. If closed → `key_tap("tab")` → recapture → recheck (max 2 retries).
+4. With Pointer Precision off, `HumanMouse.hover_at_game(1005, 67)`
+   to slot 1's centre; sleep 800 ms for tooltip render.
+5. `cap.ocr_rois(img, {"gold": (965, 130, 1085, 165)})`.
+6. Regex extract `[\d,]+`; range-check; return int.
+7. Park cursor at (640, 700) so the tooltip dismisses cleanly.
+
+Live result: `OCR raw: ['金', '4,681']` → `GOLD = 4,681` ✓
+
+### Diagnostics retained
+
+These are throwaway scripts kept around for re-running on calibration
+drift / new game versions:
+
+* `flasher/mouse_ping_test.py` — round-trip latency probe.
+* `flasher/keyboard_test.py` — verify Tab tap reaches the game.
+* `flasher/human_mouse_demo.py` — sweep cursor through 5 game points
+  to eyeball trajectory smoothness.
+* `flasher/walk_4dir_test.py` — re-calibrate per-direction tile pitch.
+* `flasher/walk_primitive_test.py` — regression test that
+  `walk("N",3)` → `walk("S",3)` → `walk("E",3)` → `walk("W",3)`
+  returns near start.
+
+### Open work
+
+* Diagonal directions (NE/NW/SE/SW) are defined in `lineage_walk.py`
+  but the per-direction pitch isn't measured yet.
+* No obstacle awareness — character will dead-end on walls.
+* Walking is a single click; for path-around-obstacle the bot needs
+  a higher-level navigator (deferred until needed).
+
+---
+
 ## 2026-05-01 — Status row: 6 fields surfaced via OCR + agreement validation
 
 ### What got added

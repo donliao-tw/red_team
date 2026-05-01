@@ -1,24 +1,40 @@
-// hid_mouse — Absolute-positioning HID mouse for the human-like AI competition.
+// hid_mouse — Composite HID (mouse + keyboard) for the human-like
+// AI competition.
 //
-// Identifies as a real USB HID mouse (VID/PID injected at compile time).
-// Receives ASCII commands over USB serial and produces real HID reports
-// indistinguishable from a physical mouse at the OS Raw Input level.
+// Identifies as a real USB HID device (VID/PID + descriptors injected
+// at compile time). Receives ASCII commands over USB serial and
+// produces real HID reports indistinguishable from a physical mouse +
+// keyboard at the OS Raw Input level.
+//
+// **v0.4 — relative-delta mouse.** Earlier versions used HID-Project's
+// AbsoluteMouse (digitizer / tablet HID descriptor). Lineage Classic
+// filters tablet-style absolute pointer reports, so hover events never
+// reached the game's tooltip system. The standard ``Mouse`` class
+// uses a relative-delta descriptor that matches a regular consumer
+// USB mouse — Lineage treats those reports identically to a physical
+// mouse.
 //
 // Protocol (line-terminated by \n):
-//   M x y    — move to absolute (x, y) where 0 <= x,y <= 32767
-//   C        — left click
-//   R        — right click
-//   D        — left button press (hold)
-//   U        — left button release
-//   P        — ping        (responds: pong)
-//   V        — version     (responds: hid_mouse v<n>)
+//   MR dx dy   mouse: move by relative delta. dx/dy are clamped on the
+//              firmware side to ±127 per report (HID limit). Panel
+//              must chunk longer moves into multiple MR commands.
+//   C          mouse: left click
+//   R          mouse: right click
+//   D          mouse: left button press (hold)
+//   U          mouse: left button release
+//   K name     keyboard: tap (press + release) the named key
+//   KD name    keyboard: hold the named key down
+//   KU name    keyboard: release key
+//   P          ping        (responds: pong)
+//   V          version     (responds: hid_mouse v<n>)
 //
-// Each command responds with `ok` on success or `err <reason>` on failure.
+// Each command responds with `ok` on success or `err <reason>` on
+// failure.
 
 #include <HID-Project.h>
 
 const unsigned long BAUD = 115200;
-const char VERSION[] = "hid_mouse v0.1";
+const char VERSION[] = "hid_mouse v0.4";  // bumped: relative mouse
 const size_t BUFSIZE = 64;
 
 char buf[BUFSIZE];
@@ -26,7 +42,8 @@ size_t bufLen = 0;
 
 void setup() {
   Serial.begin(BAUD);
-  AbsoluteMouse.begin();
+  Mouse.begin();           // relative-delta HID mouse
+  BootKeyboard.begin();
 }
 
 void loop() {
@@ -42,11 +59,62 @@ void loop() {
     if (bufLen < BUFSIZE - 1) {
       buf[bufLen++] = c;
     } else {
-      // Overflow — discard until newline.
       bufLen = 0;
       Serial.println(F("err overflow"));
     }
   }
+}
+
+KeyboardKeycode lookupKey(const char* name) {
+  if (!name || !name[0]) return KEY_RESERVED;
+  if (name[1] == '\0') {
+    char c = name[0];
+    if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+      return (KeyboardKeycode)c;
+    }
+    if (c == ' ') return (KeyboardKeycode)' ';
+  }
+  if (!strcasecmp(name, "tab"))       return KEY_TAB;
+  if (!strcasecmp(name, "esc"))       return KEY_ESC;
+  if (!strcasecmp(name, "escape"))    return KEY_ESC;
+  if (!strcasecmp(name, "enter"))     return KEY_ENTER;
+  if (!strcasecmp(name, "return"))    return KEY_ENTER;
+  if (!strcasecmp(name, "space"))     return (KeyboardKeycode)' ';
+  if (!strcasecmp(name, "backspace")) return KEY_BACKSPACE;
+  if (!strcasecmp(name, "up"))        return KEY_UP_ARROW;
+  if (!strcasecmp(name, "down"))      return KEY_DOWN_ARROW;
+  if (!strcasecmp(name, "left"))      return KEY_LEFT_ARROW;
+  if (!strcasecmp(name, "right"))     return KEY_RIGHT_ARROW;
+  if (!strcasecmp(name, "home"))      return KEY_HOME;
+  if (!strcasecmp(name, "end"))       return KEY_END;
+  if (!strcasecmp(name, "pageup"))    return KEY_PAGE_UP;
+  if (!strcasecmp(name, "pagedown"))  return KEY_PAGE_DOWN;
+  if (!strcasecmp(name, "insert"))    return KEY_INSERT;
+  if (!strcasecmp(name, "delete"))    return KEY_DELETE;
+  if (!strcasecmp(name, "shift"))     return KEY_LEFT_SHIFT;
+  if (!strcasecmp(name, "ctrl"))      return KEY_LEFT_CTRL;
+  if (!strcasecmp(name, "alt"))       return KEY_LEFT_ALT;
+  if (!strncasecmp(name, "f", 1)) {
+    int n = atoi(name + 1);
+    if (n >= 1 && n <= 12) {
+      return (KeyboardKeycode)(KEY_F1 + (n - 1));
+    }
+  }
+  return KEY_RESERVED;
+}
+
+KeyboardKeycode parseKeyCommand(const char* line, char* outVerb) {
+  *outVerb = line[0];
+  size_t verbLen = 1;
+  if (line[1] && line[1] != ' ') {
+    *outVerb = line[1];
+    verbLen = 2;
+  }
+  const char* p = line + verbLen;
+  while (*p == ' ') p++;
+  if (!*p) return KEY_RESERVED;
+  return lookupKey(p);
 }
 
 void handleLine(const char* line) {
@@ -62,41 +130,69 @@ void handleLine(const char* line) {
       return;
 
     case 'C':
-      AbsoluteMouse.click(MOUSE_LEFT);
+      Mouse.click(MOUSE_LEFT);
       Serial.println(F("ok"));
       return;
 
     case 'R':
-      AbsoluteMouse.click(MOUSE_RIGHT);
+      Mouse.click(MOUSE_RIGHT);
       Serial.println(F("ok"));
       return;
 
     case 'D':
-      AbsoluteMouse.press(MOUSE_LEFT);
+      Mouse.press(MOUSE_LEFT);
       Serial.println(F("ok"));
       return;
 
     case 'U':
-      AbsoluteMouse.release(MOUSE_LEFT);
+      Mouse.release(MOUSE_LEFT);
       Serial.println(F("ok"));
       return;
 
     case 'M': {
-      // Expected form: "M x y" — leading 'M ' then two ints.
-      const char* p = line + 1;
+      // MR dx dy — relative move. dx/dy are signed; we clamp to ±127
+      // per HID report. The panel MUST chunk longer moves itself
+      // (sending multiple MRs); doing it on the AVR adds latency.
+      if (line[1] != 'R') {
+        Serial.println(F("err unknown_cmd M"));
+        return;
+      }
+      const char* p = line + 2;
       while (*p == ' ') p++;
       char* endX = nullptr;
-      long x = strtol(p, &endX, 10);
-      if (endX == p) { Serial.println(F("err parse_x")); return; }
+      long dx = strtol(p, &endX, 10);
+      if (endX == p) { Serial.println(F("err parse_dx")); return; }
       while (*endX == ' ') endX++;
       char* endY = nullptr;
-      long y = strtol(endX, &endY, 10);
-      if (endY == endX) { Serial.println(F("err parse_y")); return; }
-      if (x < 0 || x > 32767 || y < 0 || y > 32767) {
+      long dy = strtol(endX, &endY, 10);
+      if (endY == endX) { Serial.println(F("err parse_dy")); return; }
+      if (dx < -127 || dx > 127 || dy < -127 || dy > 127) {
         Serial.println(F("err range"));
         return;
       }
-      AbsoluteMouse.moveTo((int)x, (int)y);
+      Mouse.move((signed char)dx, (signed char)dy);
+      Serial.println(F("ok"));
+      return;
+    }
+
+    case 'K': {
+      char verb = 'K';
+      KeyboardKeycode code = parseKeyCommand(line, &verb);
+      if (code == KEY_RESERVED) {
+        Serial.println(F("err unknown_key"));
+        return;
+      }
+      if (verb == 'K') {
+        BootKeyboard.press(code);
+        BootKeyboard.release(code);
+      } else if (verb == 'D') {
+        BootKeyboard.press(code);
+      } else if (verb == 'U') {
+        BootKeyboard.release(code);
+      } else {
+        Serial.println(F("err bad_verb"));
+        return;
+      }
       Serial.println(F("ok"));
       return;
     }
