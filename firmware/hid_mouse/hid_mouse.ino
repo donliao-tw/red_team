@@ -34,7 +34,7 @@
 #include <HID-Project.h>
 
 const unsigned long BAUD = 115200;
-const char VERSION[] = "hid_mouse v0.4";  // bumped: relative mouse
+const char VERSION[] = "hid_mouse v0.5";  // bumped: ASCII→HID keymap fix
 const size_t BUFSIZE = 64;
 
 char buf[BUFSIZE];
@@ -67,20 +67,30 @@ void loop() {
 
 KeyboardKeycode lookupKey(const char* name) {
   if (!name || !name[0]) return KEY_RESERVED;
+  // Single-char: convert ASCII a-z / 0-9 to proper HID usage codes.
+  // Earlier (v0.4) this cast the ASCII byte directly to
+  // KeyboardKeycode — e.g. 'm' (0x6D) became HID code 0x6D which is
+  // not the M key, so letter keys silently did nothing in-game. Tab
+  // and F-keys worked because they used the KEY_TAB / KEY_F1
+  // constants directly without going through this path.
   if (name[1] == '\0') {
     char c = name[0];
     if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-      return (KeyboardKeycode)c;
+    if (c >= 'a' && c <= 'z') {
+      return (KeyboardKeycode)(KEY_A + (c - 'a'));
     }
-    if (c == ' ') return (KeyboardKeycode)' ';
+    if (c >= '1' && c <= '9') {
+      return (KeyboardKeycode)(KEY_1 + (c - '1'));
+    }
+    if (c == '0') return KEY_0;
+    if (c == ' ') return (KeyboardKeycode)0x2C;  // HID space
   }
   if (!strcasecmp(name, "tab"))       return KEY_TAB;
   if (!strcasecmp(name, "esc"))       return KEY_ESC;
   if (!strcasecmp(name, "escape"))    return KEY_ESC;
   if (!strcasecmp(name, "enter"))     return KEY_ENTER;
   if (!strcasecmp(name, "return"))    return KEY_ENTER;
-  if (!strcasecmp(name, "space"))     return (KeyboardKeycode)' ';
+  if (!strcasecmp(name, "space"))     return (KeyboardKeycode)0x2C;  // HID space
   if (!strcasecmp(name, "backspace")) return KEY_BACKSPACE;
   if (!strcasecmp(name, "up"))        return KEY_UP_ARROW;
   if (!strcasecmp(name, "down"))      return KEY_DOWN_ARROW;

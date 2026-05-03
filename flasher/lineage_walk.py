@@ -22,9 +22,7 @@ distance if path is clear.
 """
 from __future__ import annotations
 
-import time
-
-from board_client import BoardClient
+from board_client import BoardClient, jitter_sleep
 from human_mouse import HumanMouse
 
 
@@ -92,4 +90,4 @@ def walk(mouse: HumanMouse, direction: str, n_tiles: int,
     """
     target = tile_offset_to_pixel(direction, n_tiles)
     mouse.click_at_game(*target)
-    time.sleep(wait_per_tile * n_tiles + settle_s)
+    jitter_sleep(wait_per_tile * n_tiles + settle_s)

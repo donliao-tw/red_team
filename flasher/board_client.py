@@ -53,6 +53,24 @@ HID_MIN = 0
 HID_MAX = 32767
 
 
+def jitter_sleep(nominal_s: float, *, spread: float = 0.08) -> None:
+    """Sleep around `nominal_s` with ±`spread` fractional jitter.
+
+    Anti-cheat / contest detectors flag scripted timing — a Ctrl held
+    for *exactly* 300.0 ms every press, or a click follow-through
+    that's always 80.0 ms, is a tell. This wrapper replaces every bot
+    timing constant with a random uniform around the nominal so two
+    consecutive identical calls don't have identical durations.
+
+    `spread` is the fractional half-width of the random window (0.08 =
+    ±8 %, so 300 ms becomes 276..324 ms). Small values for tight
+    holds (sub-50 ms), bigger for longer waits.
+    """
+    import random as _random
+    import time as _time
+    _time.sleep(max(0.0, nominal_s + nominal_s * _random.uniform(-spread, spread)))
+
+
 # Key-name aliases the firmware accepts. Listed here for editor
 # autocomplete / runtime validation; the canonical lookup lives in
 # the firmware's lookupKey().
@@ -207,15 +225,33 @@ class BoardClient:
         with self._lock:
             self._command(f"KU {name}")
 
-    def key_combo(self, modifier: str, key: str) -> None:
-        """Modifier-held tap. e.g. ``key_combo('shift', 'a')`` for ``Shift+A``,
-        ``key_combo('ctrl', 'c')`` for copy. The firmware itself doesn't
-        understand combos, so we send three commands: hold modifier, tap
-        key, release modifier. The lock acquired by each call serialises
-        them — interleaving with other callers can't break the combo."""
+    def key_combo(self, modifier: str, key: str,
+                  *, pre_hold_s: float = 0.30,
+                  inner_hold_s: float = 0.06,
+                  post_hold_s: float = 0.06) -> None:
+        """Modifier-held tap. e.g. ``key_combo('ctrl', 'm')`` opens
+        Lineage's mini-map. The firmware doesn't understand combos
+        natively — we send four discrete commands with jittered
+        sleeps between, so the OS sees:
+
+            t=0      Ctrl down
+            t≈300ms  M down  (Ctrl still held)
+            t≈360ms  M up
+            t≈420ms  Ctrl up
+
+        Lineage Classic specifically needs the modifier held for
+        ≥ ~300 ms before the key is tapped (per user's habit), so
+        ``pre_hold_s`` defaults there. All three intervals are
+        jittered ±8 % via ``jitter_sleep`` so the combo isn't a
+        timing fingerprint.
+        """
         self.key_down(modifier)
         try:
-            self.key_tap(key)
+            jitter_sleep(pre_hold_s)
+            self.key_down(key)
+            jitter_sleep(inner_hold_s)
+            self.key_up(key)
+            jitter_sleep(post_hold_s)
         finally:
             self.key_up(modifier)
 
