@@ -100,6 +100,25 @@ class HumanMouse:
         time.sleep(max(0.0, (kwargs.get("post_click_ms", 120)
                              + random.randint(-30, 40)) / 1000))
 
+    def hold_at_game(self, game_x: int, game_y: int, hold_s: float,
+                     *, duration_ms: int | None = None,
+                     pre_press_ms: int = 80) -> None:
+        """Smooth-move to (game_x, game_y), press the left button,
+        hold for ``hold_s`` seconds (jittered), then release.
+
+        Lineage's continuous-walk uses this: holding the left button
+        with the cursor over a faraway tile makes the character walk
+        toward it indefinitely (it stops automatically when it hits
+        an obstacle). For movement loops we hold ~1-2 s, release,
+        check the minimap, then re-aim.
+        """
+        self.move_to_game(game_x, game_y, duration_ms=duration_ms)
+        time.sleep(max(0.0, (pre_press_ms + random.randint(-20, 30)) / 1000))
+        self.client.press()
+        # Jitter the hold so the press isn't exactly hold_s every time.
+        time.sleep(max(0.0, hold_s + hold_s * random.uniform(-0.08, 0.08)))
+        self.client.release()
+
     # ────────────────────────── internals ──────────────────────────
 
     def _smooth_move_to_screen(self, target_screen: tuple[int, int],

@@ -83,11 +83,44 @@ def walk(mouse: HumanMouse, direction: str, n_tiles: int,
     """Click the tile n_tiles in `direction` from player and wait for
     the character to arrive.
 
-    The wait is based on the requested tile count + a small settle
-    margin. If the character is blocked partway, the wait still
-    elapses; subsequent walks just redirect from wherever the
-    character actually stopped.
+    Note: Lineage's *normal* movement is press-and-hold, which lets
+    the character walk continuously and stop automatically on
+    obstacles. ``walk()`` (single click) only works for short hops;
+    long traversal should use ``walk_hold()`` instead so we don't
+    have to keep re-clicking after each stop.
     """
     target = tile_offset_to_pixel(direction, n_tiles)
     mouse.click_at_game(*target)
     jitter_sleep(wait_per_tile * n_tiles + settle_s)
+
+
+def walk_hold(mouse: HumanMouse, direction: str,
+              hold_s: float | tuple[float, float] = (0.8, 2.5),
+              *, far_tiles: int = 8) -> float:
+    """Press-and-hold left button toward a faraway tile in
+    ``direction`` for ``hold_s`` seconds, then release.
+
+    ``hold_s`` may be a single number or a ``(low, high)`` range; if
+    a range, the actual hold time is sampled uniformly. **Always pass
+    a range** for movement loops — a fixed hold reads as scripted to
+    detection. ``HumanMouse.hold_at_game`` already adds ±8 % micro
+    jitter on top of whatever value we pass, but human-like behaviour
+    needs per-move *macro* variation as well (some movements are 0.9 s,
+    some 2.4 s, depending on what the bot is heading toward).
+
+    ``far_tiles`` controls *how far* the click is aimed; bounded by
+    hold time + obstacles. 8 gives the cursor a clearly off-direction
+    landing point so the character keeps walking instead of arriving
+    and stopping.
+
+    Returns the hold time actually used (for logging).
+    """
+    import random as _random
+    if isinstance(hold_s, tuple):
+        lo, hi = hold_s
+        actual = _random.uniform(lo, hi)
+    else:
+        actual = float(hold_s)
+    target = tile_offset_to_pixel(direction, far_tiles)
+    mouse.hold_at_game(*target, hold_s=actual)
+    return actual
