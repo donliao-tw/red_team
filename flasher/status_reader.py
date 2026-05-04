@@ -201,14 +201,18 @@ def classify_time_of_day(crop_arr: np.ndarray) -> Optional[str]:
 def make_default_readers() -> dict[str, FieldReader]:
     """Standard reader set for the Lineage status panel.
 
-    Numeric ranges are loose — we just want to filter OCR garbage like
-    'O' read as '0' inside multi-digit results that exceed the value
-    domain.
+    Per-field ranges are tightened to the **actual game domain** to
+    catch OCR misreads. The common one: when RapidOCR reads ``17%`` as
+    ``178`` (the trailing ``%`` rendered as ``8`` because of font
+    similarity), a permissive 0..200 range accepts the bogus value.
+    Hunger / mdef can't physically exceed 100, weight rarely goes
+    past ~120 in normal play, so capping each at its real maximum
+    makes "% misread as digit" rejected by range alone.
     """
     return {
         "defense": FieldReader("defense", lambda s: parse_int(s, lo=0, hi=999)),
-        "mdef":    FieldReader("mdef",    parse_percent),
-        "weight":  FieldReader("weight",  parse_percent),
-        "hunger":  FieldReader("hunger",  parse_percent),
+        "mdef":    FieldReader("mdef",    lambda s: parse_percent(s, lo=0, hi=100)),
+        "weight":  FieldReader("weight",  lambda s: parse_percent(s, lo=0, hi=150)),
+        "hunger":  FieldReader("hunger",  lambda s: parse_percent(s, lo=0, hi=100)),
         "lawful":  FieldReader("lawful",  parse_lawful),
     }

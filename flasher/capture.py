@@ -549,6 +549,16 @@ class GameMonitor:
         self._hp_max: int | None = None
         self._mp_max: int | None = None
 
+        # Decoration offset — frame coords shift relative to the
+        # baseline (1280×960 client → 1282×992 frame, title=31,
+        # border=1) when the game window is on a monitor with
+        # different DPI / theme / chrome sizes. Re-computed on first
+        # frame after attach by comparing streamer frame size to the
+        # baseline expected for the detected client size.
+        self._roi_offset: tuple[int, int] = (0, 0)
+        self._roi_baseline_set: bool = False
+        self._roi_src: dict | None = None
+
         # The fast loop reads HP/MP via template match (sub-ms). The
         # slow loop OCRs the rest. Drop chat (no bot signal) and HP/MP
         # (owned by fast loop). Drop the parent `debuffs` ROI too since
@@ -622,27 +632,22 @@ class GameMonitor:
         size = get_client_size(hwnd)
         if size != self._last_size:
             self._last_size = size
+            self._roi_baseline_set = False  # re-calibrate offset
             if size == (1280, 960):
-                src = ROI_1280x960
+                self._roi_src = ROI_1280x960
             elif size == (1920, 1032):
-                src = ROI_1920x1032
+                self._roi_src = ROI_1920x1032
             else:
-                src = None
-            if src is not None:
-                self._poll_rois = {
-                    k: v for k, v in src.items()
-                    if k not in ("chat_log", "hp_text", "mp_text", "debuffs")
-                }
-                self._hp_box = src["hp_text"]
-                self._mp_box = src["mp_text"]
-                self._time_icon_box = src.get("time_icon")
-            if src is None:
+                self._roi_src = None
+            if self._roi_src is None:
                 self.window_size_wrong.emit(*size)
                 self._set_connection(
                     False,
                     f"視窗大小 {size[0]}×{size[1]} 不支援（需 1280×960）",
                 )
                 return False
+            # Apply ROIs with current offset (0,0 until a frame measures).
+            self._apply_roi_offset()
 
         # Account id from window title — cheap, no OCR.
         title = get_window_title(hwnd)
@@ -662,6 +667,75 @@ class GameMonitor:
         self._set_connection(True, f"已連接 {self._needle} {size[0]}×{size[1]}")
         return True
 
+    def _calibrate_roi_offset(self, frame_img) -> None:
+        """One-shot calibration after the first WGC frame arrives.
+
+        ROIs were measured against the dev machine's chrome (1-px
+        border, 31-px title bar). On another monitor / DPI / theme
+        the title bar runs 45-50 px and shifts every ROI down — HP
+        text crops then sample brass trim above the bar instead of
+        the digits and template match returns nothing.
+
+        Step 1: compute a coarse offset from chrome-size delta.
+        Step 2: scan ±3 px around the coarse Y offset, picking the
+                 first value that makes ``read_hp`` succeed. Real
+                 monitors have sub-pixel rendering noise that makes
+                 the chrome-size formula off-by-one occasionally.
+        """
+        if self._last_size is None:
+            return
+        cw, ch = self._last_size
+        fw, fh = frame_img.size
+        v_chrome = fh - ch
+        h_chrome = fw - cw
+        coarse = (h_chrome // 2 - 1, v_chrome - 32)
+        self._roi_offset = coarse
+        self._apply_roi_offset()
+        self._roi_baseline_set = True
+
+        # Fine-tune: try ±3 px Y shifts; whichever lets read_hp
+        # parse a value wins. read_hp is fast (~0.3 ms) so the scan
+        # is cheap.
+        import numpy as np
+        from digit_match import read_hp
+        best_dy = coarse[1]
+        for dy_try in (coarse[1], coarse[1] - 1, coarse[1] + 1,
+                       coarse[1] - 2, coarse[1] + 2,
+                       coarse[1] - 3, coarse[1] + 3):
+            self._roi_offset = (coarse[0], dy_try)
+            self._apply_roi_offset()
+            try:
+                hp_arr = np.asarray(frame_img.crop(self._hp_box))
+                hp = read_hp(hp_arr, self._templates)
+            except Exception:  # noqa: BLE001
+                hp = None
+            if hp is not None:
+                best_dy = dy_try
+                break
+        self._roi_offset = (coarse[0], best_dy)
+        self._apply_roi_offset()
+
+    def _apply_roi_offset(self) -> None:
+        """Re-derive ``_poll_rois`` / ``_hp_box`` / ``_mp_box`` /
+        ``_time_icon_box`` from ``_roi_src`` plus the current
+        ``_roi_offset``."""
+        if self._roi_src is None:
+            return
+        dx, dy = self._roi_offset
+
+        def shift(roi):
+            return (roi[0] + dx, roi[1] + dy, roi[2] + dx, roi[3] + dy)
+
+        self._poll_rois = {
+            k: shift(v)
+            for k, v in self._roi_src.items()
+            if k not in ("chat_log", "hp_text", "mp_text", "debuffs")
+        }
+        self._hp_box = shift(self._roi_src["hp_text"])
+        self._mp_box = shift(self._roi_src["mp_text"])
+        time_box = self._roi_src.get("time_icon")
+        self._time_icon_box = shift(time_box) if time_box else None
+
     def _fast_poll(self) -> None:
         """HP/MP via template match — sub-millisecond, exact integer."""
         if self._streamer is None:
@@ -669,6 +743,10 @@ class GameMonitor:
         img = self._streamer.latest()
         if img is None:
             return
+        # First frame after attach: calibrate ROI offset for this
+        # monitor's window decoration size.
+        if not self._roi_baseline_set:
+            self._calibrate_roi_offset(img)
         import numpy as np
         from digit_match import read_hp, read_mp
         hp_arr = np.asarray(img.crop(self._hp_box))

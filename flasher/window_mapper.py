@@ -28,6 +28,21 @@ from ctypes import wintypes
 
 _user32 = ctypes.windll.user32
 
+# Make this process DPI-aware once at import time. Without this, Win32
+# calls (GetClientRect / GetCursorPos / etc.) return *logical* pixels
+# scaled down by the active DPI factor — e.g. a Lineage window at
+# 2048×1536 reports as 1365×1024 under 150 % DPI, and frame coords
+# (which WGC captures at physical resolution) no longer match Win32
+# coords. With per-monitor DPI awareness Win32 returns physical pixels
+# and the two sources line up. Safe at 100 % DPI too — just no-ops.
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_DPI_AWARE
+except Exception:
+    try:
+        _user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 # GetSystemMetrics indices for the virtual screen (covers all monitors).
 SM_XVIRTUALSCREEN  = 76
 SM_YVIRTUALSCREEN  = 77
