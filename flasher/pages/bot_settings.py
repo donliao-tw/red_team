@@ -10,6 +10,20 @@ from ._base import Page
 DEFAULT_MOB_BLACKLIST = "史萊姆;魔法師;克特;黑長者;飛龍;巨大飛龍;卡士伯;巴土瑟;馬庫爾;西瑪;巨蟬女皇;死亡騎士"
 DEFAULT_PICKUP_BLACKLIST = "箭;肉;+0 箭;+0 銀箭"
 
+# Speak-scroll hotkey choices: F1-F3 + F5-F12. F4 skipped per Lineage
+# convention (F4 is the system close-window key on most clients).
+SHOP_HOTKEY_CHOICES = ["F1", "F2", "F3"] + [f"F{i}" for i in range(5, 13)]
+
+# Built-in shopping list. (display_name, default_qty). The bot
+# multiplies by quantity when typing the buy command via the
+# speak-scroll. Users can disable individual rows.
+SHOP_DEFAULT_ITEMS = [
+    ("meat",     "肉",         19),
+    ("teleport", "瞬間移動卷軸", 100),
+    ("return",   "返回卷軸",     3),
+    ("transform","變身卷軸",    10),
+]
+
 
 class BotSettingsPage(Page):
     title = "機器人設定"
@@ -23,6 +37,7 @@ class BotSettingsPage(Page):
         self._tab_indices: dict[str, int] = {}
         self._tab_indices["protect"] = self.tabs.addTab(self._build_protect_tab(), "保護設定")
         self._tab_indices["afk"]     = self.tabs.addTab(self._build_afk_tab(),     "自動設定")
+        self._tab_indices["shop"]    = self.tabs.addTab(self._build_shop_tab(),    "購物設定")
         self._tab_indices["doll"]    = self.tabs.addTab(self._build_doll_tab(),    "娃娃設定")
 
         self.body_layout.addWidget(self.tabs, stretch=1)
@@ -92,6 +107,75 @@ class BotSettingsPage(Page):
             "娃娃功能設定",
             "輔助治療角色（娃娃）跟團行為，例如自動補血/補魔範圍與優先順序。",
         )
+
+    # ────────────────────────────── shop tab ──────────────────────────────
+
+    def _build_shop_tab(self) -> QtWidgets.QWidget:
+        wrap = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(wrap)
+        outer.setContentsMargins(0, 8, 0, 0)
+        outer.setSpacing(12)
+
+        outer.addWidget(self._build_shop_hotkey_card())
+        outer.addWidget(self._build_shop_defaults_card())
+        outer.addWidget(self._build_shop_custom_card(), stretch=1)
+        return wrap
+
+    def _build_shop_hotkey_card(self) -> QtWidgets.QFrame:
+        card, layout = widgets.make_card("說話卷軸熱鍵")
+        layout.addWidget(widgets.hint(
+            "說話卷軸請放在 F1-F3 或 F5-F12 任一格上（F4 通常是關閉視窗熱鍵，避免衝突）。"
+        ))
+
+        row, h = self._row()
+        h.addWidget(widgets.label("熱鍵位置:"))
+        combo = QtWidgets.QComboBox()
+        combo.addItems(SHOP_HOTKEY_CHOICES)
+        combo.setCurrentText("F5")
+        combo.setFixedWidth(80)
+        self.cfg["shop_hotkey"] = combo
+        h.addWidget(combo)
+        h.addStretch(1)
+        layout.addWidget(row)
+        return card
+
+    def _build_shop_defaults_card(self) -> QtWidgets.QFrame:
+        card, layout = widgets.make_card("預設購物清單")
+        layout.addWidget(widgets.hint(
+            "勾選要購買的項目並調整數量。每次購物循環會依序購買勾選的項目。"
+        ))
+
+        # One row per default item: [enable cb] [name] [qty input]
+        for key, display, default_qty in SHOP_DEFAULT_ITEMS:
+            row, h = self._row()
+            cb = widgets.checkbox("", checked=True)
+            self.cfg[f"shop_{key}_enabled"] = cb
+            h.addWidget(cb)
+
+            name_lbl = widgets.label(display)
+            name_lbl.setMinimumWidth(120)
+            h.addWidget(name_lbl)
+
+            h.addWidget(widgets.label("數量:"))
+            qty = widgets.num_entry(str(default_qty), width=72)
+            self.cfg[f"shop_{key}_qty"] = qty
+            h.addWidget(qty)
+            h.addStretch(1)
+            layout.addWidget(row)
+        return card
+
+    def _build_shop_custom_card(self) -> QtWidgets.QFrame:
+        card, layout = widgets.make_card("自訂購物清單")
+        layout.addWidget(widgets.hint(
+            "預設清單以外要買的東西寫在這裡，每行一筆，前面加 cbb。\n"
+            "範例：cbb 解除詛咒的卷軸 5"
+        ))
+
+        ta = widgets.textarea("", height=120)
+        ta.setPlaceholderText("cbb 物品名稱 數量\ncbb 物品名稱 數量")
+        self.cfg["shop_custom"] = ta
+        layout.addWidget(ta, stretch=1)
+        return card
 
     def _placeholder_tab(self, title: str, hint: str) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
