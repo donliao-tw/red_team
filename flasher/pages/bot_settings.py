@@ -16,46 +16,58 @@ DEFAULT_PICKUP_BLACKLIST = "箭;肉;+0 箭;+0 銀箭"
 
 
 class ShopItemListEditor(QtWidgets.QWidget):
-    """List editor with name + quantity rows and a [+] button to
-    add more. Each row has a [×] delete button. value() returns
-    ``list[(name, qty)]`` of non-empty rows for serialisation."""
+    """List editor for custom shop items. Each row mirrors the layout
+    of the default-items rows: ``[✓ checkbox] [name input] [數量:]
+    [qty input] [×]`` so the eye reads them as a continuous list.
+
+    A "＋ 新增項目" button at the bottom appends a blank row.
+    value() returns ``list[(enabled, name, qty)]`` for the rows that
+    have a non-empty name; serialisation skips empty rows so a
+    half-typed entry doesn't accidentally save.
+    """
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         v = QtWidgets.QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(4)
+        v.setSpacing(6)
 
         self._rows_container = QtWidgets.QWidget()
         self._rows_layout = QtWidgets.QVBoxLayout(self._rows_container)
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
-        self._rows_layout.setSpacing(4)
+        self._rows_layout.setSpacing(6)
         v.addWidget(self._rows_container)
 
-        # [+ 新增] button row
         add_row = QtWidgets.QHBoxLayout()
         add_row.setContentsMargins(0, 0, 0, 0)
         self._add_btn = QtWidgets.QPushButton("＋ 新增項目")
         self._add_btn.setObjectName("shopAdd")
         self._add_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self._add_btn.clicked.connect(lambda: self._add_row("", ""))
+        self._add_btn.clicked.connect(lambda: self._add_row(True, "", ""))
         add_row.addWidget(self._add_btn)
         add_row.addStretch(1)
         v.addLayout(add_row)
 
-    def _add_row(self, name: str, qty: str) -> None:
+    def _add_row(self, enabled: bool, name: str, qty: str) -> None:
         row = QtWidgets.QWidget()
         h = QtWidgets.QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(6)
+        h.setSpacing(8)
+
+        cb = QtWidgets.QCheckBox()
+        cb.setChecked(bool(enabled))
+        h.addWidget(cb)
 
         name_e = QtWidgets.QLineEdit(name)
         name_e.setPlaceholderText("物品名稱")
-        h.addWidget(name_e, stretch=3)
+        name_e.setMinimumWidth(120)
+        h.addWidget(name_e, stretch=1)
+
+        h.addWidget(QtWidgets.QLabel("數量:"))
 
         qty_e = QtWidgets.QLineEdit(str(qty))
-        qty_e.setPlaceholderText("數量")
-        qty_e.setFixedWidth(80)
+        qty_e.setPlaceholderText("0")
+        qty_e.setFixedWidth(72)
         qty_e.setAlignment(QtCore.Qt.AlignCenter)
         h.addWidget(qty_e)
 
@@ -72,29 +84,32 @@ class ShopItemListEditor(QtWidgets.QWidget):
         self._rows_layout.removeWidget(row)
         row.deleteLater()
 
-    def value(self) -> list[tuple[str, str]]:
+    def value(self) -> list[tuple[bool, str, str]]:
         out = []
         for i in range(self._rows_layout.count()):
             row = self._rows_layout.itemAt(i).widget()
             if row is None:
                 continue
+            cb = row.findChild(QtWidgets.QCheckBox)
             inputs = row.findChildren(QtWidgets.QLineEdit)
-            if len(inputs) < 2:
+            if cb is None or len(inputs) < 2:
                 continue
             name, qty = inputs[0].text().strip(), inputs[1].text().strip()
             if name:
-                out.append((name, qty))
+                out.append((bool(cb.isChecked()), name, qty))
         return out
 
     def set_value(self, items) -> None:
-        # Clear existing
         while self._rows_layout.count():
             row = self._rows_layout.takeAt(0).widget()
             if row is not None:
                 row.deleteLater()
         for entry in items or []:
-            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
-                self._add_row(str(entry[0]), str(entry[1]))
+            if isinstance(entry, (list, tuple)):
+                if len(entry) >= 3:
+                    self._add_row(bool(entry[0]), str(entry[1]), str(entry[2]))
+                elif len(entry) >= 2:
+                    self._add_row(True, str(entry[0]), str(entry[1]))
 
 # Built-in shopping list. (display_name, default_qty). The bot
 # multiplies by quantity when typing the buy command via the
