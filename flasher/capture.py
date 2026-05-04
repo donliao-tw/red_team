@@ -554,9 +554,12 @@ class GameMonitor:
         # border=1) when the game window is on a monitor with
         # different DPI / theme / chrome sizes. Re-computed on first
         # frame after attach by comparing streamer frame size to the
-        # baseline expected for the detected client size.
+        # baseline expected for the detected client size. Also
+        # invalidated mid-session if the frame size changes (user
+        # drags the window to a different monitor).
         self._roi_offset: tuple[int, int] = (0, 0)
         self._roi_baseline_set: bool = False
+        self._roi_calibrated_frame_size: tuple[int, int] | None = None
         self._roi_src: dict | None = None
 
         # The fast loop reads HP/MP via template match (sub-ms). The
@@ -692,6 +695,7 @@ class GameMonitor:
         self._roi_offset = coarse
         self._apply_roi_offset()
         self._roi_baseline_set = True
+        self._roi_calibrated_frame_size = frame_img.size
 
         # Fine-tune: try ±3 px Y shifts; whichever lets read_hp
         # parse a value wins. read_hp is fast (~0.3 ms) so the scan
@@ -743,9 +747,11 @@ class GameMonitor:
         img = self._streamer.latest()
         if img is None:
             return
-        # First frame after attach: calibrate ROI offset for this
-        # monitor's window decoration size.
-        if not self._roi_baseline_set:
+        # First frame after attach OR frame size changed (user
+        # dragged the window to a different monitor with different
+        # chrome): re-calibrate the ROI offset.
+        if (not self._roi_baseline_set
+                or self._roi_calibrated_frame_size != img.size):
             self._calibrate_roi_offset(img)
         import numpy as np
         from digit_match import read_hp, read_mp
