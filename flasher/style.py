@@ -374,6 +374,37 @@ QPushButton#help {{
 }}
 QPushButton#help:hover {{ background-color: {c['help_hover']}; }}
 
+/* Shop list editor — small × delete button per row + ＋ add button.
+   Default QPushButton padding 6/14 hides text in tiny 28×28 boxes. */
+QPushButton#shopDel {{
+    background-color: transparent;
+    color: #b85a5a;
+    border: 1px solid {c['border']};
+    border-radius: 4px;
+    padding: 0;
+    font-size: {16 + d}pt;
+    font-weight: bold;
+}}
+QPushButton#shopDel:hover {{
+    background-color: rgba(184, 90, 90, 0.18);
+    color: #ff7070;
+    border-color: #aa4444;
+}}
+QPushButton#shopAdd {{
+    background-color: transparent;
+    color: {c['text_secondary']};
+    border: 1px dashed {c['border']};
+    border-radius: 4px;
+    padding: 6px 16px;
+    font-weight: 500;
+}}
+QPushButton#shopAdd:hover {{
+    background-color: {c['nav_hover']};
+    color: {c['text_primary']};
+    border-color: {c['accent']};
+    border-style: solid;
+}}
+
 /* Inputs */
 QLineEdit {{
     background-color: {c['bg_input']};
