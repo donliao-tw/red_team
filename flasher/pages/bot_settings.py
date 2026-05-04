@@ -14,6 +14,88 @@ DEFAULT_PICKUP_BLACKLIST = "箭;肉;+0 箭;+0 銀箭"
 # F5-F12 = skill slot in that page). F4 is the pickup key in
 # Lineage Classic — never used for skills.
 
+
+class ShopItemListEditor(QtWidgets.QWidget):
+    """List editor with name + quantity rows and a [+] button to
+    add more. Each row has a [×] delete button. value() returns
+    ``list[(name, qty)]`` of non-empty rows for serialisation."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(4)
+
+        self._rows_container = QtWidgets.QWidget()
+        self._rows_layout = QtWidgets.QVBoxLayout(self._rows_container)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(4)
+        v.addWidget(self._rows_container)
+
+        # [+ 新增] button row
+        add_row = QtWidgets.QHBoxLayout()
+        add_row.setContentsMargins(0, 0, 0, 0)
+        self._add_btn = QtWidgets.QPushButton("＋ 新增項目")
+        self._add_btn.setObjectName("shopAdd")
+        self._add_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self._add_btn.clicked.connect(lambda: self._add_row("", ""))
+        add_row.addWidget(self._add_btn)
+        add_row.addStretch(1)
+        v.addLayout(add_row)
+
+    def _add_row(self, name: str, qty: str) -> None:
+        row = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+
+        name_e = QtWidgets.QLineEdit(name)
+        name_e.setPlaceholderText("物品名稱")
+        h.addWidget(name_e, stretch=3)
+
+        qty_e = QtWidgets.QLineEdit(str(qty))
+        qty_e.setPlaceholderText("數量")
+        qty_e.setFixedWidth(80)
+        qty_e.setAlignment(QtCore.Qt.AlignCenter)
+        h.addWidget(qty_e)
+
+        del_btn = QtWidgets.QPushButton("×")
+        del_btn.setObjectName("shopDel")
+        del_btn.setFixedSize(28, 28)
+        del_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        del_btn.clicked.connect(lambda: self._remove_row(row))
+        h.addWidget(del_btn)
+
+        self._rows_layout.addWidget(row)
+
+    def _remove_row(self, row: QtWidgets.QWidget) -> None:
+        self._rows_layout.removeWidget(row)
+        row.deleteLater()
+
+    def value(self) -> list[tuple[str, str]]:
+        out = []
+        for i in range(self._rows_layout.count()):
+            row = self._rows_layout.itemAt(i).widget()
+            if row is None:
+                continue
+            inputs = row.findChildren(QtWidgets.QLineEdit)
+            if len(inputs) < 2:
+                continue
+            name, qty = inputs[0].text().strip(), inputs[1].text().strip()
+            if name:
+                out.append((name, qty))
+        return out
+
+    def set_value(self, items) -> None:
+        # Clear existing
+        while self._rows_layout.count():
+            row = self._rows_layout.takeAt(0).widget()
+            if row is not None:
+                row.deleteLater()
+        for entry in items or []:
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                self._add_row(str(entry[0]), str(entry[1]))
+
 # Built-in shopping list. (display_name, default_qty). The bot
 # multiplies by quantity when typing the buy command via the
 # speak-scroll. Users can disable individual rows.
@@ -165,14 +247,12 @@ class BotSettingsPage(Page):
     def _build_shop_custom_card(self) -> QtWidgets.QFrame:
         card, layout = widgets.make_card("自訂購物清單")
         layout.addWidget(widgets.hint(
-            "預設清單以外要買的東西寫在這裡，每行一筆，前面加 cbb。\n"
-            "範例：cbb 解除詛咒的卷軸 5"
+            "預設清單以外要買的東西點「＋ 新增項目」加進來，bot 會自動加 cbb 前綴去買。"
         ))
 
-        ta = widgets.textarea("", height=120)
-        ta.setPlaceholderText("cbb 物品名稱 數量\ncbb 物品名稱 數量")
-        self.cfg["shop_custom"] = ta
-        layout.addWidget(ta, stretch=1)
+        editor = ShopItemListEditor()
+        self.cfg["shop_custom"] = editor
+        layout.addWidget(editor)
         return card
 
     def _placeholder_tab(self, title: str, hint: str) -> QtWidgets.QWidget:
