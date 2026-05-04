@@ -10,9 +10,9 @@ from ._base import Page
 DEFAULT_MOB_BLACKLIST = "史萊姆;魔法師;克特;黑長者;飛龍;巨大飛龍;卡士伯;巴土瑟;馬庫爾;西瑪;巨蟬女皇;死亡騎士"
 DEFAULT_PICKUP_BLACKLIST = "箭;肉;+0 箭;+0 銀箭"
 
-# Speak-scroll hotkey choices: F1-F3 + F5-F12. F4 skipped per Lineage
-# convention (F4 is the system close-window key on most clients).
-SHOP_HOTKEY_CHOICES = ["F1", "F2", "F3"] + [f"F{i}" for i in range(5, 13)]
+# Speak-scroll hotkey: paged model (F1-F3 = skill page switch,
+# F5-F12 = skill slot in that page). F4 is the pickup key in
+# Lineage Classic — never used for skills.
 
 # Built-in shopping list. (display_name, default_qty). The bot
 # multiplies by quantity when typing the buy command via the
@@ -124,17 +124,15 @@ class BotSettingsPage(Page):
     def _build_shop_hotkey_card(self) -> QtWidgets.QFrame:
         card, layout = widgets.make_card("說話卷軸熱鍵")
         layout.addWidget(widgets.hint(
-            "說話卷軸請放在 F1-F3 或 F5-F12 任一格上（F4 通常是關閉視窗熱鍵，避免衝突）。"
+            "先選技能分頁 (F1=P1 / F2=P2 / F3=P3)，再選該頁上說話卷軸放在哪格 (F5-F12)。\n"
+            "F4 是拾取鍵，不能當技能用。"
         ))
 
         row, h = self._row()
         h.addWidget(widgets.label("熱鍵位置:"))
-        combo = QtWidgets.QComboBox()
-        combo.addItems(SHOP_HOTKEY_CHOICES)
-        combo.setCurrentText("F5")
-        combo.setFixedWidth(80)
-        self.cfg["shop_hotkey"] = combo
-        h.addWidget(combo)
+        hk = widgets.HotkeyMenu("P1-F5", paged=True)
+        self.cfg["shop_hotkey"] = hk
+        h.addWidget(hk)
         h.addStretch(1)
         layout.addWidget(row)
         return card
