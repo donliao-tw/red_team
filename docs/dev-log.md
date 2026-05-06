@@ -5,6 +5,146 @@ Newest entries on top.
 
 ---
 
+## 2026-05-06 — Shopping pipeline: speak-scroll teleport → shop scroll-OCR → buy
+
+End-to-end verified: bot can autonomously restock 治癒藥水 (or any item on the
+shopping list) from the 奇岩村 雜貨商人 without any human input after launch.
+
+### Phase breakdown
+
+[flasher/full_shopping_test.py](../flasher/full_shopping_test.py) is the
+orchestrator. Each phase is also an independent test script for regression:
+
+| Phase | Script | Status |
+|---|---|---|
+| 1. Speak-scroll teleport | `speak_to_merchant_test.py` | ✓ |
+| 2. Find merchant + open shop | `find_merchant_test.py`, `open_shop_test.py` | ✓ |
+| 3. Scroll-OCR + buy | `buy_scrolls_test.py`, `buy_potion_simple_test.py` | ✓ |
+
+**Phase 1 — speak scroll + menu navigation:**
+- Fire hotkey P3-F6 (page 3, slot F6) → speak scroll teleport menu appears.
+- OCR the menu list; scroll wheel-down until the `奇岩村 → 雜貨商人` entry is
+  visible (fuzzy match: substring + drop-one-char fuzz handles OCR pathologies).
+- Click the entry → sleep 2.5 s for teleport to complete.
+
+**Phase 2 — locate merchant + open shop:**
+- Hover a list of candidate game-pixel positions around the 雜貨商 sprite;
+  grab a frame after each hover and OCR for the `雜貨商` label (RapidOCR).
+- Click ~30 px below the label centroid (sprite body, not label).
+- Wait for the Buy/Sell dialog; find `btn_buy_sell.png` template → click Buy.
+- Verify shop window opened: `find_shop_buy()` must return a match.
+
+**Phase 3 — scroll-OCR + buy:**
+- Park cursor over the item list; scroll to top (20 wheel-up ticks).
+- For each `(item, qty)` pair: `find_and_click_item()` scrolls and OCRs
+  (7 ticks / iter, 10 iter max); `name_matches()` handles three OCR
+  pathologies: prefix decoration, simplified-char substitution, single-char
+  drop.
+- After clicking the row, `type_qty()` sleeps **1.0 s** before the first
+  keystroke — required for the qty input to enter "accepting" state (Lineage
+  focus quirk; anything shorter flakes).
+- Single bottom-Buy click (`shop_buy_cancel.png` template match) closes the
+  transaction for all queued rows at once.
+
+### Key bugs found and fixed during development
+
+**1. Row click → qty-input focus delay (~0.5–1 s)**
+
+Clicking a row visibly highlights it immediately, but the qty input doesn't
+accept keystrokes until ~1 s later. Scripted click + immediate `key_tap`
+produced a silently highlighted row with qty still at 0. Fix: mandatory 1.0 s
+pre-pause inside `type_qty()`. Smaller pauses (0.4 s, 0.5 s) flaked.
+
+**2. shop_buy_cancel.png must exclude the "Total : N/M" text**
+
+The bottom bar reads `Total : <line-cost>/<player-gold> [Buy] [Cancel]`.
+Both numbers are dynamic — line-cost jumps when you set qty; player-gold
+drops after each purchase. A template that includes those digits drops below
+the NCC threshold the moment any value changes, so `find_shop_buy()` returns
+None right when it's needed most. Template now covers only the Buy + Cancel
+buttons and their fixed wood-frame borders.
+
+**3. SetForegroundWindow kills qty-input focus**
+
+Adding `user32.SetForegroundWindow(hwnd)` calls inside `find_and_click_item()`
+caused `type_qty()` to silently no-op — keystrokes went nowhere even after
+the 1 s pause. Theory: SetForegroundWindow resets the shop's implicit
+qty-input focus. Fix: remove all SetForegroundWindow from the item-find loop
+(the working buy_scrolls_test that typed 10+3 correctly had none).
+
+### Template files added
+
+- `flasher/templates/btn_buy_sell.png` — Buy/Sell dialog pair (stable; used in
+  phase 2 to confirm dialog open and click Buy).
+- `flasher/templates/shop_buy_cancel.png` — Buy + Cancel buttons only,
+  no "Total" text (see bug #2 above).
+
+### Diagnostics / iteration scripts (kept for regression)
+
+`buy_meat_test.py`, `click_buy_test.py`, `click_buy_potion_simple_test.py`,
+`shop_dump_test.py`, `type_one_test.py` — progressively isolated the focus
+timing issue. `shop_dump_test.py` dumps a full OCR of the shop list for
+offline name-matching calibration.
+
+### Open / deferred
+
+- Arrow-lost handling (user navigates away mid-buy; bot should detect and
+  re-open the shop rather than crash).
+- Multi-merchant support (currently hard-coded to 奇岩村 雜貨商人).
+- Integrate shopping into the main bot loop — currently standalone scripts only.
+
+---
+
+## 2026-05-04 — Firmware v0.6: MW wheel-scroll + human_mouse settle damping
+
+### Firmware v0.6 — MW wheel command
+
+Added `MW <ticks>` to the HID protocol. `ticks > 0` scrolls up, `ticks < 0`
+scrolls down (HID convention). Clamped to ±127 per report, same as `MR`.
+
+Python side: `BoardClient.wheel(ticks)` in
+[flasher/board_client.py](../flasher/board_client.py) — chunks into ±127
+segments, thread-safe via the existing `_lock`. Callers (the shop scroll
+loop) send `wheel(-1)` once per tick so OS-level report coalescing doesn't
+drop ticks.
+
+Lineage shop: 1 HID wheel tick = 1 row scroll (confirmed empirically).
+The scroll-find loop sends `SCROLL_STEP = 7` ticks per OCR iteration, which
+advances almost exactly one full page (8 visible rows) minus 1 row of overlap
+— fastest scan without risking that a target row gets skipped between
+consecutive OCR windows.
+
+### HumanMouse bezier aim-fraction + damped settle loop
+
+Two changes to [flasher/human_mouse.py](../flasher/human_mouse.py):
+
+**`BEZIER_AIM_FRACTION = 0.65`** — the bezier endpoint is deliberately aimed
+at 65% of the true displacement. On the dev machine the Windows mickey-to-pixel
+ratio runs ~1.65× (mouse speed slider below the 6/11 neutral point), so a
+bezier aimed at the true target overshoots by ~50% and looks like a visible
+lunge. Under-shooting to 65% keeps the visible arc clean; the settle loop
+closes the gap.
+
+**Damped settle loop (20 iters, `DAMPING = 0.6`)** — replaces the previous
+single-shot corrective move. Each iteration reads `GetCursorPos`, sends
+`DAMPING × residual` delta. At `1.65×` mickey ratio, gain per iter ≈ 0.99
+(converges monotonically). At `1.0×` ratio, gain ≈ 0.6 (converges in 3–4
+iters). Loop exits as soon as `|Δx| ≤ 1 and |Δy| ≤ 1`. Pre-drain sleep of
+50 ms before iter 0 so in-flight bezier reports don't corrupt the first
+cursor read.
+
+`HUMAN_MOUSE_DEBUG=1` env var prints per-iteration cursor/target/Δ to stderr
+for convergence tracing.
+
+### Calibration scripts added
+
+- `flasher/wheel_scroll_test.py` — send N wheel ticks, observe scroll distance.
+- `flasher/cursor_precision_test.py` — move to 10 fixed targets, report final
+  cursor position vs. target to measure settle accuracy.
+- `flasher/flash_v06.py` — convenience flash helper for v0.6 firmware.
+
+---
+
 ## 2026-05-02 — Bot output path: hid_mouse firmware v0.4 + walk primitive
 
 The whole "panel can drive the game" stack: firmware that produces real
