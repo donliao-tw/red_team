@@ -205,6 +205,19 @@ class BoardClient:
         with self._lock:
             self._command("U")
 
+    def wheel(self, ticks: int) -> None:
+        """Vertical mouse wheel scroll. ``ticks > 0`` scrolls up,
+        ``ticks < 0`` scrolls down (HID convention). Long scrolls are
+        chunked into ±127 reports — but most apps treat 1 tick as a
+        big jump (Lineage shop = 7 rows / tick), so callers usually
+        pass ±1, ±2."""
+        ticks = int(ticks)
+        with self._lock:
+            while ticks != 0:
+                step = max(-DELTA_MAX, min(DELTA_MAX, ticks))
+                self._command(f"MW {step}")
+                ticks -= step
+
     # ── keyboard ───────────────────────────────────────────────────
 
     def key_tap(self, name: str) -> None:

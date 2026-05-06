@@ -1,5 +1,8 @@
 """Human-like cursor movement on top of the raw BoardClient.
 
+Set the env var ``HUMAN_MOUSE_DEBUG=1`` to log each corrective-settle
+iteration so we can diagnose convergence issues.
+
 Even with a real-mouse-style HID descriptor (firmware v0.4+, relative
 deltas), a cursor that teleports in straight lines at constant speed
 reads as scripted to anti-cheat / contest-judge analysis. This module
@@ -34,11 +37,15 @@ Implementation notes for v0.4+ relative-delta firmware:
 from __future__ import annotations
 
 import math
+import os
 import random
+import sys
 import time
 
 from board_client import BoardClient
 from window_mapper import client_to_screen, get_cursor_screen_pos
+
+_DEBUG = bool(os.environ.get("HUMAN_MOUSE_DEBUG"))
 
 
 # Tuning knobs — exposed at module level so a future settings page
@@ -47,6 +54,10 @@ DEFAULT_FPS = 100               # interpolation steps per second
 MIN_DURATION_MS = 180
 DURATION_PER_PIXEL = 0.4        # ms per pixel of screen distance (~400 ms / 1000 px)
 JITTER_RANDOM_MS_RANGE = (-30, 60)
+# Bezier path aims this fraction of the way to the true target. Picks
+# up the slack that Windows ballistics adds (mickey-to-pixel ratio is
+# >1 on most machines). Leaves the settle loop a small gap to close.
+BEZIER_AIM_FRACTION = 0.65
 
 
 class HumanMouse:
@@ -153,6 +164,19 @@ class HumanMouse:
         steps = max(2, int(duration_ms * DEFAULT_FPS / 1000))
         sleep_per_step = duration_ms / 1000 / steps
 
+        # Pre-scale the bezier endpoint so the path deliberately
+        # *under*-shoots the true target, then let the settle loop
+        # close the gap. Why: Windows ballistics scales 1 HID mickey
+        # to ~1.5 screen px on this machine (mouse-speed slider isn't
+        # at 6/11). If the bezier plans against the true target the
+        # cursor ends up ~50% past it and the user sees a visible
+        # overshoot before the settle pulls back. Aiming the bezier
+        # at 65% of the displacement keeps the visible motion clean
+        # for ratios up to ~1.5×; the settle loop handles whatever
+        # remains.
+        bezier_endpoint = (start[0] + dx_total * BEZIER_AIM_FRACTION,
+                           start[1] + dy_total * BEZIER_AIM_FRACTION)
+
         # Cubic bezier control points: two waypoints between start and
         # end, each offset perpendicular to the direct line by a random
         # fraction of the distance — gives the path a gentle arc.
@@ -161,16 +185,16 @@ class HumanMouse:
         o2 = random.uniform(-0.15, 0.15) * dist
         t1 = random.uniform(0.2, 0.4)
         t2 = random.uniform(0.6, 0.8)
-        p1 = (start[0] + dx_total * t1 + nx * o1,
-              start[1] + dy_total * t1 + ny * o1)
-        p2 = (start[0] + dx_total * t2 + nx * o2,
-              start[1] + dy_total * t2 + ny * o2)
+        p1 = (start[0] + dx_total * BEZIER_AIM_FRACTION * t1 + nx * o1,
+              start[1] + dy_total * BEZIER_AIM_FRACTION * t1 + ny * o1)
+        p2 = (start[0] + dx_total * BEZIER_AIM_FRACTION * t2 + nx * o2,
+              start[1] + dy_total * BEZIER_AIM_FRACTION * t2 + ny * o2)
 
         prev_x, prev_y = start
         for i in range(1, steps + 1):
             t = i / steps
             te = _ease_in_out_cubic(t)
-            x, y = _cubic_bezier(start, p1, p2, target_screen, te)
+            x, y = _cubic_bezier(start, p1, p2, bezier_endpoint, te)
             # Tiny sub-pixel jitter — kept small so it doesn't dominate
             # the visible motion noise.
             x += random.uniform(-0.3, 0.3)
@@ -185,14 +209,48 @@ class HumanMouse:
             if i < steps:
                 time.sleep(sleep_per_step)
 
-        # Final corrective settle: read where the cursor ended up
-        # (ballistics may have drifted it slightly off target) and snap
-        # to the exact target.
-        cur = get_cursor_screen_pos()
-        fdx = target_screen[0] - cur[0]
-        fdy = target_screen[1] - cur[1]
-        if fdx or fdy:
-            self.client.move_relative(fdx, fdy)
+        # Final corrective settle: read where the cursor actually
+        # landed and iterate until it sits on the target. One pass
+        # isn't enough when the user's mouse-speed slider isn't 6/11
+        # (the 1:1 mickey-to-pixel setting) — at e.g. 5/11 we move
+        # ~0.75 px per HID count, so a 200-count delta only travels
+        # 150 px. Loop reads cursor, sends remaining delta; with the
+        # 0.75 ratio each pass closes 75% of the gap so 5 passes is
+        # plenty to land within 1 px even from far off.
+        # Drain any HID reports still in flight from the bezier path
+        # before reading cursor — otherwise iter 1 reads a stale
+        # mid-path position and over-corrects.
+        time.sleep(0.050)
+        # Damping factor: each iteration sends only this fraction of
+        # the observed residual. Windows pointer-ballistics scales
+        # raw HID counts non-linearly (we've measured the user's
+        # machine at ~1.65× for big chunks, dropping toward ~1.0×
+        # for small ones), so a delta sized 1:1 to the residual will
+        # overshoot and trigger oscillation. With damping 0.6, even
+        # a worst-case 1.65× ratio yields ~1.0× effective gain, so
+        # the loop monotonically approaches the target. Final iters
+        # naturally fall to <1 px.
+        DAMPING = 0.6
+        for i in range(20):
+            cur = get_cursor_screen_pos()
+            fdx = target_screen[0] - cur[0]
+            fdy = target_screen[1] - cur[1]
+            if _DEBUG:
+                print(f"  settle iter {i}: cursor={cur} target={target_screen} "
+                      f"Δ=({fdx:+d},{fdy:+d})", file=sys.stderr)
+            if abs(fdx) <= 1 and abs(fdy) <= 1:
+                break
+            # Round half-away-from-zero so a residual of ±1 still
+            # produces a non-zero correction after damping.
+            cdx = int(fdx * DAMPING + (0.5 if fdx >= 0 else -0.5))
+            cdy = int(fdy * DAMPING + (0.5 if fdy >= 0 else -0.5))
+            if cdx == 0 and cdy == 0:
+                # Damping rounded both axes to zero but we're still
+                # outside tolerance — send a 1-px nudge each axis.
+                cdx = 1 if fdx > 0 else (-1 if fdx < 0 else 0)
+                cdy = 1 if fdy > 0 else (-1 if fdy < 0 else 0)
+            self.client.move_relative(cdx, cdy)
+            time.sleep(0.030)
 
     @staticmethod
     def _default_duration_ms(pixel_distance: float) -> int:

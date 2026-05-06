@@ -18,6 +18,8 @@
 //   MR dx dy   mouse: move by relative delta. dx/dy are clamped on the
 //              firmware side to ±127 per report (HID limit). Panel
 //              must chunk longer moves into multiple MR commands.
+//   MW ticks   mouse: vertical wheel scroll. positive=up, negative=down
+//              (HID convention). Clamped to ±127 ticks per report.
 //   C          mouse: left click
 //   R          mouse: right click
 //   D          mouse: left button press (hold)
@@ -34,7 +36,7 @@
 #include <HID-Project.h>
 
 const unsigned long BAUD = 115200;
-const char VERSION[] = "hid_mouse v0.5";  // bumped: ASCII→HID keymap fix
+const char VERSION[] = "hid_mouse v0.6";  // bumped: MW wheel scroll cmd
 const size_t BUFSIZE = 64;
 
 char buf[BUFSIZE];
@@ -160,28 +162,45 @@ void handleLine(const char* line) {
       return;
 
     case 'M': {
-      // MR dx dy — relative move. dx/dy are signed; we clamp to ±127
-      // per HID report. The panel MUST chunk longer moves itself
-      // (sending multiple MRs); doing it on the AVR adds latency.
-      if (line[1] != 'R') {
-        Serial.println(F("err unknown_cmd M"));
+      if (line[1] == 'R') {
+        // MR dx dy — relative move. dx/dy are signed; we clamp to
+        // ±127 per HID report. The panel MUST chunk longer moves
+        // itself (sending multiple MRs); doing it on the AVR adds
+        // latency.
+        const char* p = line + 2;
+        while (*p == ' ') p++;
+        char* endX = nullptr;
+        long dx = strtol(p, &endX, 10);
+        if (endX == p) { Serial.println(F("err parse_dx")); return; }
+        while (*endX == ' ') endX++;
+        char* endY = nullptr;
+        long dy = strtol(endX, &endY, 10);
+        if (endY == endX) { Serial.println(F("err parse_dy")); return; }
+        if (dx < -127 || dx > 127 || dy < -127 || dy > 127) {
+          Serial.println(F("err range"));
+          return;
+        }
+        Mouse.move((signed char)dx, (signed char)dy);
+        Serial.println(F("ok"));
         return;
       }
-      const char* p = line + 2;
-      while (*p == ' ') p++;
-      char* endX = nullptr;
-      long dx = strtol(p, &endX, 10);
-      if (endX == p) { Serial.println(F("err parse_dx")); return; }
-      while (*endX == ' ') endX++;
-      char* endY = nullptr;
-      long dy = strtol(endX, &endY, 10);
-      if (endY == endX) { Serial.println(F("err parse_dy")); return; }
-      if (dx < -127 || dx > 127 || dy < -127 || dy > 127) {
-        Serial.println(F("err range"));
+      if (line[1] == 'W') {
+        // MW ticks — vertical wheel scroll. ticks > 0 = up, < 0 = down
+        // (HID standard). Same ±127 clamp as MR.
+        const char* p = line + 2;
+        while (*p == ' ') p++;
+        char* endW = nullptr;
+        long w = strtol(p, &endW, 10);
+        if (endW == p) { Serial.println(F("err parse_wheel")); return; }
+        if (w < -127 || w > 127) {
+          Serial.println(F("err range"));
+          return;
+        }
+        Mouse.move(0, 0, (signed char)w);
+        Serial.println(F("ok"));
         return;
       }
-      Mouse.move((signed char)dx, (signed char)dy);
-      Serial.println(F("ok"));
+      Serial.println(F("err unknown_cmd M"));
       return;
     }
 
