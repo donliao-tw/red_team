@@ -273,6 +273,7 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addWidget(self._build_progress_block())
         v.addWidget(self._build_status_row())
         v.addLayout(self._build_function_grid())
+        v.addWidget(self._build_flow_runner())
         v.addWidget(self._build_stats_card())
         v.addWidget(self._build_log(), stretch=1)
         v.addLayout(self._build_footer())
@@ -668,6 +669,48 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._refresh_gear_tooltip()
         return row
+
+    # ────────────────────────────── flow runner ──────────────────────────────
+
+    def _build_flow_runner(self) -> QtWidgets.QWidget:
+        wrap = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(wrap)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        self.btn_flow_run = QtWidgets.QPushButton("▶ 執行流程")
+        self.btn_flow_run.setObjectName("flowRunBtn")
+        self.btn_flow_run.setCheckable(True)
+        self.btn_flow_run.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_flow_run.setFixedHeight(30)
+        self.btn_flow_run.toggled.connect(self._on_flow_run_toggled)
+        h.addWidget(self.btn_flow_run, stretch=1)
+
+        # Gear shortcut → 流程設定 tab
+        btn_cfg = QtWidgets.QPushButton("⚙")
+        btn_cfg.setObjectName("funcGear")
+        btn_cfg.setFixedSize(30, 30)
+        btn_cfg.setToolTip("開啟流程設定")
+        btn_cfg.setCursor(QtCore.Qt.PointingHandCursor)
+        btn_cfg.clicked.connect(self._open_flow_settings)
+        h.addWidget(btn_cfg)
+
+        return wrap
+
+    def _on_flow_run_toggled(self, running: bool) -> None:
+        self.btn_flow_run.setText("■ 停止流程" if running else "▶ 執行流程")
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        if running:
+            self.log.appendPlainText(f"[{ts}] ▶ 流程啟動（執行功能尚未接入 runtime）")
+        else:
+            self.log.appendPlainText(f"[{ts}] ■ 流程停止")
+
+    def _open_flow_settings(self) -> None:
+        self._open_settings("bot")
+        bot_page = self._settings.pages.get("bot") if self._settings else None
+        if bot_page is not None and hasattr(bot_page, "show_tab"):
+            bot_page.show_tab("flow")
 
     def _on_func_toggled(self, key: str, checked: bool) -> None:
         if checked:

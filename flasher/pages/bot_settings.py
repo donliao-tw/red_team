@@ -136,6 +136,7 @@ class BotSettingsPage(Page):
         self._tab_indices["afk"]     = self.tabs.addTab(self._build_afk_tab(),     "自動設定")
         self._tab_indices["shop"]    = self.tabs.addTab(self._build_shop_tab(),    "購物設定")
         self._tab_indices["doll"]    = self.tabs.addTab(self._build_doll_tab(),    "娃娃設定")
+        self._tab_indices["flow"]    = self.tabs.addTab(self._build_flow_tab(),    "流程設定")
 
         self.body_layout.addWidget(self.tabs, stretch=1)
 
@@ -192,6 +193,11 @@ class BotSettingsPage(Page):
             label_text="使用注意事項（hover）",
         ))
         return wrap
+
+    def _build_flow_tab(self) -> QtWidgets.QWidget:
+        from .bot_flow import BotFlowTab
+        self.flow_tab = BotFlowTab()
+        return self.flow_tab
 
     def _build_protect_tab(self) -> QtWidgets.QWidget:
         return self._placeholder_tab(
