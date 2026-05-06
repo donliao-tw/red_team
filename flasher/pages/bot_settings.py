@@ -116,7 +116,7 @@ class ShopItemListEditor(QtWidgets.QWidget):
 # speak-scroll. Users can disable individual rows.
 SHOP_DEFAULT_ITEMS = [
     ("meat",     "肉",         19),
-    ("teleport", "瞬間移動卷軸", 100),
+    ("teleport", "瞬間移動卷軸", 10),
     ("return",   "返回卷軸",     3),
     ("transform","變身卷軸",    10),
 ]
