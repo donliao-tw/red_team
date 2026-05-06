@@ -1,28 +1,28 @@
 """Bot flow editor — ordered list of automation steps.
 
-Each step has a type (teleport / shop / wait / patrol / loop) and inline
-parameters. Steps are displayed in a scrollable list; ▲▼ buttons reorder
-them and × removes them.  The widget exposes steps() / set_steps() so the
-parent page can persist the flow.
+Steps are displayed as colour-coded cards inside a dark outer panel.
+Each card has a coloured left accent bar, a number badge, a type combo,
+inline params, and ▲▼/× controls.
 """
 from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
-import widgets
+import style
 
-# (key, display_label, implemented)
+# (key, display_label, implemented, accent_colour)
 STEP_DEFS = [
-    ("teleport", "傳送",     True),
-    ("shop",     "購物",     True),
-    ("wait",     "等待",     True),
-    ("patrol",   "巡邏攻擊", False),
-    ("loop",     "重複從頭", True),
+    ("teleport", "傳送",     True,  "#4a80c0"),
+    ("shop",     "購物",     True,  "#4a9a62"),
+    ("wait",     "等待",     True,  "#c8972a"),
+    ("patrol",   "巡邏攻擊", False, "#666666"),
+    ("loop",     "重複從頭", True,  "#8855bb"),
 ]
 
-_KEYS   = [d[0] for d in STEP_DEFS]
-_LABELS = [d[1] for d in STEP_DEFS]
-_DONE   = {d[0]: d[2] for d in STEP_DEFS}
+_KEYS    = [d[0] for d in STEP_DEFS]
+_LABELS  = [d[1] for d in STEP_DEFS]
+_DONE    = {d[0]: d[2] for d in STEP_DEFS}
+_COLORS  = {d[0]: d[3] for d in STEP_DEFS}
 
 
 # ──────────────────────────── params helpers ────────────────────────────
@@ -34,15 +34,17 @@ def _make_params(step_type: str) -> QtWidgets.QWidget:
     h.setSpacing(6)
 
     if step_type == "teleport":
-        h.addWidget(QtWidgets.QLabel("目的地:"))
+        lbl = QtWidgets.QLabel("目的地:")
+        lbl.setObjectName("flowLabel")
+        h.addWidget(lbl)
         ed = QtWidgets.QLineEdit()
         ed.setPlaceholderText("例: 奇岩村 雜貨商人")
         ed.setObjectName("flowParam_destination")
         h.addWidget(ed, stretch=1)
 
     elif step_type == "shop":
-        lbl = QtWidgets.QLabel("（使用購物設定清單）")
-        lbl.setObjectName("flowParamHint")
+        lbl = QtWidgets.QLabel("使用購物設定清單")
+        lbl.setObjectName("flowHint")
         h.addWidget(lbl)
         h.addStretch(1)
 
@@ -51,13 +53,15 @@ def _make_params(step_type: str) -> QtWidgets.QWidget:
         sp.setRange(1, 600)
         sp.setValue(60 if step_type == "patrol" else 5)
         sp.setObjectName("flowParam_minutes")
-        sp.setFixedWidth(64)
+        sp.setFixedWidth(60)
         h.addWidget(sp)
-        h.addWidget(QtWidgets.QLabel("分鐘"))
+        lbl = QtWidgets.QLabel("分鐘")
+        lbl.setObjectName("flowLabel")
+        h.addWidget(lbl)
         if not _DONE[step_type]:
-            lbl = QtWidgets.QLabel("（未實作）")
-            lbl.setObjectName("flowParamHint")
-            h.addWidget(lbl)
+            tag = QtWidgets.QLabel("（未實作）")
+            tag.setObjectName("flowHint")
+            h.addWidget(tag)
         h.addStretch(1)
 
     elif step_type == "loop":
@@ -65,9 +69,11 @@ def _make_params(step_type: str) -> QtWidgets.QWidget:
         sp.setRange(0, 9999)
         sp.setValue(0)
         sp.setObjectName("flowParam_times")
-        sp.setFixedWidth(64)
+        sp.setFixedWidth(60)
         h.addWidget(sp)
-        h.addWidget(QtWidgets.QLabel("次（0＝無限）"))
+        lbl = QtWidgets.QLabel("次（0＝無限）")
+        lbl.setObjectName("flowLabel")
+        h.addWidget(lbl)
         h.addStretch(1)
 
     else:
@@ -107,33 +113,74 @@ def _apply_params(pw: QtWidgets.QWidget, step_type: str, data: dict) -> None:
 
 # ──────────────────────────── StepRow ────────────────────────────
 
-class StepRow(QtWidgets.QFrame):
-    """One step: [▲▼] [type combo] [params] [×]"""
+class StepRow(QtWidgets.QWidget):
+    """One step card: [accent bar] [num] [type] [params] [▲▼] [×]"""
 
     sig_move_up   = QtCore.Signal()
     sig_move_down = QtCore.Signal()
     sig_remove    = QtCore.Signal()
+    sig_type_changed = QtCore.Signal()
 
-    def __init__(self, step_type: str = "teleport",
+    def __init__(self, step_type: str = "teleport", index: int = 1,
                  parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("flowStep")
-        self.setFrameShape(QtWidgets.QFrame.StyledPanel)
 
         h = QtWidgets.QHBoxLayout(self)
-        h.setContentsMargins(6, 3, 6, 3)
-        h.setSpacing(6)
+        h.setContentsMargins(0, 2, 0, 2)
+        h.setSpacing(0)
 
-        # ▲▼ stack
+        # Coloured left accent strip
+        self._accent = QtWidgets.QFrame()
+        self._accent.setFixedWidth(4)
+        self._accent.setFixedHeight(36)
+        h.addWidget(self._accent)
+        h.addSpacing(8)
+
+        # Number badge
+        self._num_lbl = QtWidgets.QLabel(str(index))
+        self._num_lbl.setObjectName("stepNum")
+        self._num_lbl.setFixedSize(20, 20)
+        self._num_lbl.setAlignment(QtCore.Qt.AlignCenter)
+        h.addWidget(self._num_lbl)
+        h.addSpacing(6)
+
+        # Type combo
+        self._combo = QtWidgets.QComboBox()
+        self._combo.setObjectName("flowCombo")
+        self._combo.setFixedWidth(88)
+        for key, label, done, _ in STEP_DEFS:
+            self._combo.addItem(label, userData=key)
+            if not done:
+                model = self._combo.model()
+                item = model.item(self._combo.count() - 1)
+                if item:
+                    item.setEnabled(False)
+        init_idx = _KEYS.index(step_type) if step_type in _KEYS else 0
+        self._combo.setCurrentIndex(init_idx)
+        self._combo.currentIndexChanged.connect(self._on_type_changed)
+        h.addWidget(self._combo)
+        h.addSpacing(8)
+
+        # Params stack
+        self._stack = QtWidgets.QStackedWidget()
+        self._stack.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        for key, _, _, _ in STEP_DEFS:
+            self._stack.addWidget(_make_params(key))
+        self._stack.setCurrentIndex(init_idx)
+        h.addWidget(self._stack, stretch=1)
+        h.addSpacing(4)
+
+        # ▲▼ stacked
         btn_up = QtWidgets.QPushButton("▲")
-        btn_up.setFixedSize(22, 16)
         btn_up.setObjectName("flowArrow")
+        btn_up.setFixedSize(20, 16)
         btn_up.setCursor(QtCore.Qt.PointingHandCursor)
         btn_up.clicked.connect(self.sig_move_up)
 
         btn_dn = QtWidgets.QPushButton("▼")
-        btn_dn.setFixedSize(22, 16)
         btn_dn.setObjectName("flowArrow")
+        btn_dn.setFixedSize(20, 16)
         btn_dn.setCursor(QtCore.Qt.PointingHandCursor)
         btn_dn.clicked.connect(self.sig_move_down)
 
@@ -144,42 +191,35 @@ class StepRow(QtWidgets.QFrame):
         av.addWidget(btn_up)
         av.addWidget(btn_dn)
         h.addWidget(arrows)
-
-        # Type combo — grey out unimplemented entries
-        self._combo = QtWidgets.QComboBox()
-        self._combo.setFixedWidth(96)
-        for key, label, done in STEP_DEFS:
-            self._combo.addItem(label, userData=key)
-            if not done:
-                model = self._combo.model()
-                item = model.item(self._combo.count() - 1)
-                if item:
-                    item.setEnabled(False)
-
-        init_idx = _KEYS.index(step_type) if step_type in _KEYS else 0
-        self._combo.setCurrentIndex(init_idx)
-        self._combo.currentIndexChanged.connect(self._on_type_changed)
-        h.addWidget(self._combo)
-
-        # Params: one QWidget per type, switched via QStackedWidget
-        self._stack = QtWidgets.QStackedWidget()
-        self._stack.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-        for key, _, _ in STEP_DEFS:
-            self._stack.addWidget(_make_params(key))
-        self._stack.setCurrentIndex(init_idx)
-        h.addWidget(self._stack, stretch=1)
+        h.addSpacing(4)
 
         # × delete
         btn_x = QtWidgets.QPushButton("×")
-        btn_x.setFixedSize(24, 24)
         btn_x.setObjectName("shopDel")
+        btn_x.setFixedSize(22, 22)
         btn_x.setCursor(QtCore.Qt.PointingHandCursor)
         btn_x.clicked.connect(self.sig_remove)
         h.addWidget(btn_x)
+        h.addSpacing(4)
+
+        self._set_type(step_type)
+
+    def _set_type(self, step_type: str) -> None:
+        color = _COLORS.get(step_type, "#555")
+        self._accent.setStyleSheet(
+            f"background: {color}; border-radius: 2px;")
+        self._num_lbl.setStyleSheet(
+            f"background: {color}22; color: {color}; border-radius: 10px; "
+            f"font-size: {8 + style.FONT_DELTA}pt; font-weight: 700;")
 
     def _on_type_changed(self, idx: int) -> None:
         self._stack.setCurrentIndex(idx)
+        key = _KEYS[idx] if 0 <= idx < len(_KEYS) else "teleport"
+        self._set_type(key)
+        self.sig_type_changed.emit()
+
+    def set_number(self, n: int) -> None:
+        self._num_lbl.setText(str(n))
 
     def step_type(self) -> str:
         idx = self._combo.currentIndex()
@@ -199,7 +239,7 @@ class StepRow(QtWidgets.QFrame):
 # ──────────────────────────── FlowEditor ────────────────────────────
 
 class FlowEditor(QtWidgets.QWidget):
-    """Scrollable ordered list of StepRow widgets + ＋ add button."""
+    """Dark outer card containing the scrollable step list."""
 
     changed = QtCore.Signal()
 
@@ -209,38 +249,51 @@ class FlowEditor(QtWidgets.QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
 
+        # Outer card — dark background, rounded
+        self._card = QtWidgets.QFrame()
+        self._card.setObjectName("flowCard")
+        card_v = QtWidgets.QVBoxLayout(self._card)
+        card_v.setContentsMargins(8, 8, 8, 8)
+        card_v.setSpacing(0)
+
+        # Scroll area inside the card
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        scroll.setObjectName("flowScroll")
 
         self._container = QtWidgets.QWidget()
+        self._container.setObjectName("flowContainer")
         self._vbox = QtWidgets.QVBoxLayout(self._container)
-        self._vbox.setContentsMargins(0, 0, 4, 0)
-        self._vbox.setSpacing(4)
-        self._vbox.addStretch(1)          # sentinel stretch at the bottom
+        self._vbox.setContentsMargins(0, 0, 0, 0)
+        self._vbox.setSpacing(3)
+        self._vbox.addStretch(1)
         scroll.setWidget(self._container)
-        outer.addWidget(scroll, stretch=1)
+        card_v.addWidget(scroll)
 
+        outer.addWidget(self._card, stretch=1)
+
+        # ＋ 新增步驟 — below the card
+        add_row = QtWidgets.QHBoxLayout()
+        add_row.setContentsMargins(0, 0, 0, 0)
         add_btn = QtWidgets.QPushButton("＋ 新增步驟")
         add_btn.setObjectName("shopAdd")
         add_btn.setCursor(QtCore.Qt.PointingHandCursor)
         add_btn.clicked.connect(lambda: self.add_step("teleport"))
-        row = QtWidgets.QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(add_btn)
-        row.addStretch(1)
-        outer.addLayout(row)
+        add_row.addWidget(add_btn)
+        add_row.addStretch(1)
+        outer.addLayout(add_row)
 
         self._rows: list[StepRow] = []
 
-    # ── public API ─────────────────────────────────────────────────
+    # ── public API ──────────────────────────────────────────────────
 
     def add_step(self, step_type: str = "teleport") -> StepRow:
-        row = StepRow(step_type)
+        row = StepRow(step_type, index=len(self._rows) + 1)
         pos = len(self._rows)
         self._rows.append(row)
-        self._vbox.insertWidget(pos, row)   # before the sentinel stretch
+        self._vbox.insertWidget(pos, row)
         row.sig_move_up.connect(lambda r=row: self._move(r, -1))
         row.sig_move_down.connect(lambda r=row: self._move(r, +1))
         row.sig_remove.connect(lambda r=row: self._remove(r))
@@ -259,7 +312,11 @@ class FlowEditor(QtWidgets.QWidget):
             r = self.add_step(data.get("type", "teleport"))
             r.from_dict(data)
 
-    # ── internals ──────────────────────────────────────────────────
+    # ── internals ───────────────────────────────────────────────────
+
+    def _renumber(self) -> None:
+        for i, r in enumerate(self._rows, 1):
+            r.set_number(i)
 
     def _move(self, row: StepRow, delta: int) -> None:
         idx = self._rows.index(row)
@@ -268,11 +325,11 @@ class FlowEditor(QtWidgets.QWidget):
             return
         self._rows.pop(idx)
         self._rows.insert(new_idx, row)
-        # Rebuild order in layout (sentinel stretch stays last)
         for r in self._rows:
             self._vbox.removeWidget(r)
         for i, r in enumerate(self._rows):
             self._vbox.insertWidget(i, r)
+        self._renumber()
         self.changed.emit()
 
     def _remove(self, row: StepRow) -> None:
@@ -280,6 +337,7 @@ class FlowEditor(QtWidgets.QWidget):
             self._rows.remove(row)
         self._vbox.removeWidget(row)
         row.deleteLater()
+        self._renumber()
         self.changed.emit()
 
 
@@ -298,9 +356,11 @@ class BotFlowTab(QtWidgets.QWidget):
         name_row = QtWidgets.QHBoxLayout()
         name_row.setContentsMargins(0, 0, 0, 0)
         name_row.setSpacing(8)
-        name_row.addWidget(QtWidgets.QLabel("流程名稱:"))
+        lbl = QtWidgets.QLabel("流程名稱:")
+        lbl.setObjectName("flowLabel")
+        name_row.addWidget(lbl)
         self.name_edit = QtWidgets.QLineEdit("預設流程")
-        self.name_edit.setMaximumWidth(200)
+        self.name_edit.setMaximumWidth(180)
         name_row.addWidget(self.name_edit)
         name_row.addStretch(1)
         v.addLayout(name_row)
@@ -308,13 +368,11 @@ class BotFlowTab(QtWidgets.QWidget):
         # Hint
         hint = QtWidgets.QLabel(
             "依序執行每個步驟；「重複從頭」讓流程循環。"
-            "灰色項目尚未實作，加入後執行時會跳過。"
         )
-        hint.setObjectName("hintLabel")
+        hint.setObjectName("flowHint")
         hint.setWordWrap(True)
         v.addWidget(hint)
 
-        # The flow editor
         self.editor = FlowEditor()
         v.addWidget(self.editor, stretch=1)
 

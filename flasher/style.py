@@ -405,52 +405,94 @@ QPushButton#shopAdd:hover {{
     border-style: solid;
 }}
 
-/* Flow runner button */
-QPushButton#flowRunBtn {{
+/* ── Flow runner (main panel compact row) ── */
+
+/* Small circular play/stop toggle */
+QPushButton#flowPlay {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4a505d, stop:0.5 #3a3f4a, stop:1 #2c303a);
+        stop:0 #4a505d, stop:1 #2c303a);
     color: {c['text_primary']};
-    border: 1px solid #2a2e36;
-    border-top: 1px solid #5a6172;
-    border-radius: 5px;
-    padding: 4px 10px;
-    font-weight: 600;
+    border: 1px solid #3a3f4a;
+    border-radius: 14px;
     font-size: {10 + d}pt;
+    font-weight: 700;
+    padding: 0;
 }}
-QPushButton#flowRunBtn:hover {{
+QPushButton#flowPlay:hover {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #565d6c, stop:0.5 #454a57, stop:1 #353a44);
+        stop:0 #565d6c, stop:1 #353a44);
+    border-color: {c['accent']};
 }}
-QPushButton#flowRunBtn:checked {{
+QPushButton#flowPlay:checked {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #b85a5a, stop:1 #7a3030);
     color: #ffdddd;
     border-color: #aa4444;
 }}
 
-/* Flow step rows */
-QFrame#flowStep {{
-    background-color: {c['bg_input']};
+/* Flow name label */
+QLabel#flowName {{
+    color: {c['text_secondary']};
+    font-size: {9 + d}pt;
+}}
+
+/* ☰ flow list/settings button */
+QPushButton#flowListBtn {{
+    background: transparent;
+    color: {c['text_secondary']};
     border: 1px solid {c['border']};
-    border-radius: 4px;
+    border-radius: 5px;
+    font-size: {13 + d}pt;
+    padding: 0;
+}}
+QPushButton#flowListBtn:hover {{
+    color: {c['text_primary']};
+    border-color: {c['accent']};
+    background: {c['nav_hover']};
+}}
+
+/* ── Flow editor (settings tab) ── */
+
+/* Outer dark card wrapping the step list */
+QFrame#flowCard {{
+    background-color: {c['bg_subpanel']};
+    border: 1px solid {c['border']};
+    border-radius: 6px;
 }}
 
 /* ▲▼ reorder arrows */
 QPushButton#flowArrow {{
-    background-color: transparent;
-    color: {c['text_secondary']};
+    background: transparent;
+    color: {c['text_tertiary']};
     border: none;
     padding: 0;
-    font-size: {8 + d}pt;
+    font-size: {7 + d}pt;
 }}
 QPushButton#flowArrow:hover {{
     color: {c['text_primary']};
 }}
 
-/* Greyed param hint */
-QLabel#flowParamHint {{
+/* Type combo inside steps */
+QComboBox#flowCombo {{
+    background: {c['bg_input']};
+    border: 1px solid {c['border']};
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: {9 + d}pt;
+    color: {c['text_primary']};
+}}
+
+/* Param label (e.g. "目的地:", "分鐘") */
+QLabel#flowLabel {{
     color: {c['text_secondary']};
     font-size: {9 + d}pt;
+}}
+
+/* Greyed hint (e.g. "使用購物設定清單", "（未實作）") */
+QLabel#flowHint {{
+    color: {c['text_tertiary']};
+    font-size: {9 + d}pt;
+    font-style: italic;
 }}
 
 /* Inputs */

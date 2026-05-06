@@ -678,27 +678,34 @@ class MainWindow(QtWidgets.QMainWindow):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
 
-        self.btn_flow_run = QtWidgets.QPushButton("▶ 執行流程")
-        self.btn_flow_run.setObjectName("flowRunBtn")
-        self.btn_flow_run.setCheckable(True)
-        self.btn_flow_run.setCursor(QtCore.Qt.PointingHandCursor)
-        self.btn_flow_run.setFixedHeight(30)
-        self.btn_flow_run.toggled.connect(self._on_flow_run_toggled)
-        h.addWidget(self.btn_flow_run, stretch=1)
+        # Small circular play/stop toggle
+        self.btn_flow_play = QtWidgets.QPushButton("▶")
+        self.btn_flow_play.setObjectName("flowPlay")
+        self.btn_flow_play.setCheckable(True)
+        self.btn_flow_play.setFixedSize(28, 28)
+        self.btn_flow_play.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_flow_play.setToolTip("執行 / 停止流程")
+        self.btn_flow_play.toggled.connect(self._on_flow_run_toggled)
+        h.addWidget(self.btn_flow_play)
 
-        # Gear shortcut → 流程設定 tab
-        btn_cfg = QtWidgets.QPushButton("⚙")
-        btn_cfg.setObjectName("funcGear")
-        btn_cfg.setFixedSize(30, 30)
-        btn_cfg.setToolTip("開啟流程設定")
-        btn_cfg.setCursor(QtCore.Qt.PointingHandCursor)
-        btn_cfg.clicked.connect(self._open_flow_settings)
-        h.addWidget(btn_cfg)
+        # Flow name label — will update when settings change
+        self.lbl_flow_name = QtWidgets.QLabel("預設流程")
+        self.lbl_flow_name.setObjectName("flowName")
+        h.addWidget(self.lbl_flow_name, stretch=1)
+
+        # ☰ opens flow settings (distinct from the ⚙ gear above)
+        btn_list = QtWidgets.QPushButton("☰")
+        btn_list.setObjectName("flowListBtn")
+        btn_list.setFixedSize(28, 28)
+        btn_list.setToolTip("流程設定")
+        btn_list.setCursor(QtCore.Qt.PointingHandCursor)
+        btn_list.clicked.connect(self._open_flow_settings)
+        h.addWidget(btn_list)
 
         return wrap
 
     def _on_flow_run_toggled(self, running: bool) -> None:
-        self.btn_flow_run.setText("■ 停止流程" if running else "▶ 執行流程")
+        self.btn_flow_play.setText("■" if running else "▶")
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M:%S")
         if running:
