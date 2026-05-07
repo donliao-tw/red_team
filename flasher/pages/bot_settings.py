@@ -112,20 +112,20 @@ class ShopItemListEditor(QtWidgets.QWidget):
                     self._add_row(True, str(entry[0]), str(entry[1]))
 
 DEFAULT_HEAL_TABLE = [
-    (70,  5),
-    (50, 15),
-    (40, 30),
-    (30, 70),
-    (25, 100),
+    (70,  5, 1),
+    (50, 15, 1),
+    (40, 30, 2),
+    (30, 70, 2),
+    (25, 100, 3),
 ]
 
 
 class HealTableEditor(QtWidgets.QWidget):
-    """Editable list of (hp_threshold%, heal_probability%) conditions.
+    """Editable list of (hp_threshold%, probability%, cast_count) conditions.
 
-    Row layout:  血量 < [SpinBox]%  →  [SpinBox]% 機率補血  [×]
+    Row layout:  血量 < [SpinBox]%  →  [SpinBox]% 機率觸發，施放 [SpinBox] 次  [×]
     Rows are evaluated top-to-bottom at runtime; the first matching
-    threshold triggers the heal roll.
+    threshold rolls the probability, then fires the skill N times if triggered.
     """
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
@@ -145,15 +145,15 @@ class HealTableEditor(QtWidgets.QWidget):
         add_btn = QtWidgets.QPushButton("＋ 新增條件")
         add_btn.setObjectName("shopAdd")
         add_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        add_btn.clicked.connect(lambda: self._add_row(50, 10))
+        add_btn.clicked.connect(lambda: self._add_row(50, 10, 1))
         add_row.addWidget(add_btn)
         add_row.addStretch(1)
         v.addLayout(add_row)
 
-        for hp, prob in DEFAULT_HEAL_TABLE:
-            self._add_row(hp, prob)
+        for hp, prob, count in DEFAULT_HEAL_TABLE:
+            self._add_row(hp, prob, count)
 
-    def _add_row(self, hp: int, prob: int) -> None:
+    def _add_row(self, hp: int, prob: int, count: int = 1) -> None:
         row = QtWidgets.QWidget()
         h = QtWidgets.QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
@@ -165,19 +165,27 @@ class HealTableEditor(QtWidgets.QWidget):
         hp_spin.setRange(1, 100)
         hp_spin.setValue(hp)
         hp_spin.setSuffix(" %")
-        hp_spin.setFixedWidth(72)
+        hp_spin.setFixedWidth(64)
         h.addWidget(hp_spin)
 
         h.addWidget(QtWidgets.QLabel("→"))
 
         prob_spin = QtWidgets.QSpinBox()
-        prob_spin.setRange(0, 100)
+        prob_spin.setRange(1, 100)
         prob_spin.setValue(prob)
         prob_spin.setSuffix(" %")
-        prob_spin.setFixedWidth(72)
+        prob_spin.setFixedWidth(64)
         h.addWidget(prob_spin)
 
-        h.addWidget(QtWidgets.QLabel("機率補血"))
+        h.addWidget(QtWidgets.QLabel("機率，補"))
+
+        count_spin = QtWidgets.QSpinBox()
+        count_spin.setRange(1, 10)
+        count_spin.setValue(max(1, count))
+        count_spin.setFixedWidth(44)
+        h.addWidget(count_spin)
+
+        h.addWidget(QtWidgets.QLabel("次"))
         h.addStretch(1)
 
         del_btn = QtWidgets.QPushButton("×")
@@ -193,15 +201,15 @@ class HealTableEditor(QtWidgets.QWidget):
         self._rows_layout.removeWidget(row)
         row.deleteLater()
 
-    def value(self) -> list[tuple[int, int]]:
+    def value(self) -> list[tuple[int, int, int]]:
         out = []
         for i in range(self._rows_layout.count()):
             row = self._rows_layout.itemAt(i).widget()
             if row is None:
                 continue
             spins = row.findChildren(QtWidgets.QSpinBox)
-            if len(spins) >= 2:
-                out.append((spins[0].value(), spins[1].value()))
+            if len(spins) >= 3:
+                out.append((spins[0].value(), spins[1].value(), spins[2].value()))
         return out
 
     def set_value(self, data) -> None:
@@ -210,7 +218,9 @@ class HealTableEditor(QtWidgets.QWidget):
             if row is not None:
                 row.deleteLater()
         for entry in (data or []):
-            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            if isinstance(entry, (list, tuple)) and len(entry) >= 3:
+                self._add_row(int(entry[0]), int(entry[1]), int(entry[2]))
+            elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
                 self._add_row(int(entry[0]), int(entry[1]))
 
 

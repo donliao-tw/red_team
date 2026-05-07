@@ -20,7 +20,7 @@ class DollHealController(QtCore.QObject):
 
     healed  = QtCore.Signal(str)   # emitted after each successful heal
 
-    COOLDOWN_BASE    = 2.5   # seconds between heals
+    COOLDOWN_BASE    = 0.5   # seconds between heal checks
     COOLDOWN_JITTER  = 0.08  # fractional ± jitter on cooldown
 
     def __init__(self, client, settings: dict,
@@ -58,23 +58,24 @@ class DollHealController(QtCore.QObject):
             return
 
         # First matching threshold
-        prob = None
-        for threshold, probability in self._table:
+        matched = None
+        for threshold, probability, cast_count in self._table:
             if pct < threshold:
-                prob = probability
+                matched = (probability, cast_count)
                 break
 
-        if prob is None or prob <= 0:
+        if matched is None:
             return
 
+        prob, count = matched
         if random.randint(1, 100) > prob:
             return
 
-        self._fire()
+        self._fire(count)
 
     # ── internals ────────────────────────────────────────────────────
 
-    def _fire(self) -> None:
+    def _fire(self, count: int = 1) -> None:
         self._last_fire = time.monotonic()
         page_key, slot_key = self._parse_skill(self._skill)
         if self._client is not None:
@@ -82,11 +83,14 @@ class DollHealController(QtCore.QObject):
             if page_key:
                 self._client.key_tap(page_key)
                 jitter_sleep(0.15, spread=0.10)
-            # Press the skill key twice — in Lineage double-tap targets self
-            self._client.key_tap(slot_key)
-            jitter_sleep(0.12, spread=0.10)
-            self._client.key_tap(slot_key)
-        skill_str = (f"{page_key.upper()}+" if page_key else "") + f"{slot_key.upper()}×2"
+            for i in range(count):
+                if i > 0:
+                    jitter_sleep(0.4, spread=0.10)
+                # Double-tap slot key — Lineage targets self on second press
+                self._client.key_tap(slot_key)
+                jitter_sleep(0.12, spread=0.10)
+                self._client.key_tap(slot_key)
+        skill_str = (f"{page_key.upper()}+" if page_key else "") + f"{slot_key.upper()}×{count*2}"
         self.healed.emit(skill_str)
 
     @staticmethod
