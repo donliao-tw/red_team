@@ -1,11 +1,11 @@
-"""Doll (娃娃) heal controller.
+"""Doll (娃娃) heal controller — self-heal only.
 
 Watches the HP signal from GameMonitor and fires the configured heal
 skill via the Arduino HID when the HP% crosses a threshold with the
 configured probability.
 
-Only "補自己" (self-heal) is implemented.  "補別人" logs a warning and
-does nothing — it requires party-member HP OCR which is not yet built.
+Self-heal sequence: switch page (F1/F2/F3) → press slot key twice.
+Pressing the skill twice in Lineage targets the caster themselves.
 """
 from __future__ import annotations
 
@@ -28,14 +28,12 @@ class DollHealController(QtCore.QObject):
         """
         client   — BoardClient instance (or None for dry-run).
         settings — dict with keys:
-            "target"     : "self" | "other"
             "heal_skill" : "P1-F5" style hotkey string
             "heal_table" : [(hp_threshold%, probability%), ...]
                            evaluated top-to-bottom; first match wins.
         """
         super().__init__(parent)
         self._client  = client
-        self._target  = settings.get("target", "self")
         self._skill   = settings.get("heal_skill", "P1-F5")
         raw_table     = settings.get("heal_table", [])
         # Sort descending by HP threshold so we can stop at first match
@@ -48,9 +46,6 @@ class DollHealController(QtCore.QObject):
     def on_hp(self, current: int, max_val: int) -> None:
         if max_val <= 0:
             return
-
-        if self._target != "self":
-            return  # party HP OCR not yet implemented
 
         pct = current / max_val * 100
 
@@ -84,10 +79,14 @@ class DollHealController(QtCore.QObject):
         page_key, slot_key = self._parse_skill(self._skill)
         if self._client is not None:
             from board_client import jitter_sleep
-            self._client.key_tap(page_key)
-            jitter_sleep(0.15, spread=0.10)
+            if page_key:
+                self._client.key_tap(page_key)
+                jitter_sleep(0.15, spread=0.10)
+            # Press the skill key twice — in Lineage double-tap targets self
             self._client.key_tap(slot_key)
-        skill_str = f"{page_key.upper()}+{slot_key.upper()}"
+            jitter_sleep(0.12, spread=0.10)
+            self._client.key_tap(slot_key)
+        skill_str = (f"{page_key.upper()}+" if page_key else "") + f"{slot_key.upper()}×2"
         self.healed.emit(skill_str)
 
     @staticmethod

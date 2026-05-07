@@ -780,14 +780,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stop_doll()   # clean up any leftover controller first
 
         # Read settings from the bot settings page if it's already open.
-        settings: dict = {"target": "self", "heal_skill": "P1-F5", "heal_table": []}
+        settings: dict = {"heal_skill": "P1-F5", "heal_table": []}
         if self._settings is not None:
             bot_page = self._settings.pages.get("bot")
             if bot_page is not None:
                 cfg = getattr(bot_page, "cfg", {})
-                grp = cfg.get("doll_target")
-                if grp is not None and grp.checkedButton() is not None:
-                    settings["target"] = grp.checkedButton().property("value") or "self"
                 hk = cfg.get("doll_heal_skill")
                 if hk is not None:
                     settings["heal_skill"] = hk.value()
@@ -803,9 +800,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M:%S")
-        target_label = "自己" if settings["target"] == "self" else "別人（未實作）"
         self.log.appendPlainText(
-            f"[{ts}] 🧘 娃娃補血啟動 — 補{target_label} / "
+            f"[{ts}] 🧘 娃娃補血啟動 — "
             f"技能 {settings['heal_skill']} / "
             f"{len(settings['heal_table'])} 條件"
         )
