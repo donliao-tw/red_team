@@ -39,8 +39,7 @@ class DollHealController(QtCore.QObject):
         self._table   = sorted(raw_table, key=lambda x: -x[0])
         self._last_fire: float = 0.0
         self._page_key, self._slot_key = self._parse_skill(self._skill)
-        # Switch to the correct skill page once at startup
-        self._switch_page()
+        self._page_switched = False   # switch page on first fire, not at init
 
     # ── public slot ─────────────────────────────────────────────────
 
@@ -77,20 +76,17 @@ class DollHealController(QtCore.QObject):
 
     # ── internals ────────────────────────────────────────────────────
 
-    def _switch_page(self) -> None:
-        if self._page_key and self._client is not None:
-            from board_client import jitter_sleep
-            self._client.key_tap(self._page_key)
-            jitter_sleep(0.3, spread=0.10)
-
     def _fire(self, count: int = 1) -> None:
         self._last_fire = time.monotonic()
         if self._client is not None:
             from board_client import jitter_sleep
+            if not self._page_switched and self._page_key:
+                self._client.key_tap(self._page_key)
+                jitter_sleep(0.3, spread=0.10)
+                self._page_switched = True
             for i in range(count):
                 if i > 0:
                     jitter_sleep(0.4, spread=0.10)
-                # Double-tap slot key — Lineage targets self on second press
                 self._client.key_tap(self._slot_key)
                 jitter_sleep(0.20, spread=0.08)
                 self._client.key_tap(self._slot_key)
