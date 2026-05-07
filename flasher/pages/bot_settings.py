@@ -164,20 +164,18 @@ class HealTableEditor(QtWidgets.QWidget):
         hp_spin = QtWidgets.QSpinBox()
         hp_spin.setRange(1, 100)
         hp_spin.setValue(hp)
-        hp_spin.setSuffix(" %")
-        hp_spin.setFixedWidth(64)
+        hp_spin.setFixedWidth(52)
         h.addWidget(hp_spin)
 
-        h.addWidget(QtWidgets.QLabel("→"))
+        h.addWidget(QtWidgets.QLabel("%  →"))
 
         prob_spin = QtWidgets.QSpinBox()
         prob_spin.setRange(1, 100)
         prob_spin.setValue(prob)
-        prob_spin.setSuffix(" %")
-        prob_spin.setFixedWidth(64)
+        prob_spin.setFixedWidth(52)
         h.addWidget(prob_spin)
 
-        h.addWidget(QtWidgets.QLabel("機率，補"))
+        h.addWidget(QtWidgets.QLabel("% 機率，補"))
 
         count_spin = QtWidgets.QSpinBox()
         count_spin.setRange(1, 10)
