@@ -5,6 +5,51 @@ Newest entries on top.
 
 ---
 
+## 2026-05-07 — Bot flow editor + Doll heal runtime
+
+### Bot flow editor (流程設定)
+
+Added `flasher/pages/bot_flow.py` with `StepRow`, `FlowEditor`, and `BotFlowTab`.
+Integrated into `BotSettingsPage` as the 5th inner tab "流程設定".
+
+Step types: 傳送（目的地）/ 購物（使用購物清單）/ 等待（分鐘）/ 巡邏攻擊（未實作）/ 重複從頭（次數）.
+
+Visual design: each step card has a 4px coloured left accent strip + numbered
+badge (colour matches accent), type combo, inline params stack, ▲▼ reorder
+arrows, and × delete. Steps sit inside a dark `#flowCard` QFrame with a scroll
+area. The ＋ button sits outside the card below.
+
+Main panel: compact circular ▶ play button (`#flowPlay`, 28×28) + `#flowName`
+label + ☰ list button opens flow settings. Toggling starts/stops the flow runner
+(currently logs to console; actual runtime deferred).
+
+### Doll heal controller (娃娃補血)
+
+**New file: `flasher/doll_controller.py`** — `DollHealController(QObject)`:
+- `on_hp(current, max_val)` slot wired to `GameMonitor.hp_changed` (5 Hz)
+- Reads the heal table (sorted descending by HP threshold) and fires the first
+  matching condition according to its probability
+- 2.5 s cooldown ± 8% jitter between heals (anti-cheat)
+- Fires page-switch key then slot key via `BoardClient.key_tap()` with 150 ms ±
+  10% jitter between the two
+- "補別人" mode stubs out (returns immediately) — requires party HP OCR, deferred
+
+**`main.py` changes:**
+- Import `DollHealController`
+- `_doll_ctrl: DollHealController | None` + `_board_client` lazy attributes in
+  `__init__`
+- `_on_func_toggled("doll", checked)` now calls `_start_doll()` / `_stop_doll()`
+- `_start_doll()` reads live settings from the bot page's `cfg` dict
+  (`doll_target` / `doll_heal_skill` / `doll_heal_table`), creates the
+  controller, connects `hp_changed`, logs startup summary
+- `_stop_doll()` disconnects the signal, calls `deleteLater()`, logs stop
+- `_get_board_client()` auto-detects the first responsive Arduino COM port
+- `_on_doll_healed(skill_str)` logs each heal attempt to the console
+
+Smoke-test: `QT_QPA_PLATFORM=offscreen python -c "..."` → OK.
+
+---
+
 ## 2026-05-06 — Shopping pipeline: speak-scroll teleport → shop scroll-OCR → buy
 
 End-to-end verified: bot can autonomously restock 治癒藥水 (or any item on the

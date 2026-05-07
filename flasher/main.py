@@ -15,6 +15,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 import capture as cap
 import style
+from doll_controller import DollHealController
 from settings_dialog import SettingsDialog
 
 
@@ -288,6 +289,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # against same-value no-ops prevents the ping-pong from looping.
         self.btn_afk.colorChanged.connect(self.btn_doll.set_checked_color)
         self.btn_doll.colorChanged.connect(self.btn_afk.set_checked_color)
+
+        # Doll heal controller — created on demand when the 🧘 toggle fires.
+        self._doll_ctrl: DollHealController | None = None
+        self._board_client = None   # lazy-init on first hardware need
 
         # Loading veil — hidden once the first OCR pass succeeds.
         self.loading = LoadingOverlay(central)
@@ -735,10 +740,95 @@ class MainWindow(QtWidgets.QMainWindow):
                         btn.blockSignals(False)
                         if other in self._activation_order:
                             self._activation_order.remove(other)
+                        if other == "doll":
+                            self._stop_doll()
+
+            if key == "doll":
+                self._start_doll()
         else:
             if key in self._activation_order:
                 self._activation_order.remove(key)
+            if key == "doll":
+                self._stop_doll()
         self._refresh_gear_tooltip()
+
+    # ── doll heal runtime ────────────────────────────────────────────
+
+    def _get_board_client(self):
+        """Lazy-init BoardClient, auto-detecting the first recognised port."""
+        if self._board_client is not None:
+            return self._board_client
+        try:
+            from board_client import BoardClient, BoardClientError
+            import serial.tools.list_ports as list_ports
+            candidates = list(list_ports.comports())
+            for port in candidates:
+                try:
+                    c = BoardClient(port.device)
+                    c.ping()
+                    self._board_client = c
+                    return c
+                except Exception:
+                    pass
+        except Exception as exc:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.log.appendPlainText(f"[{ts}] ⚠ 無法連接 Arduino: {exc}")
+        return None
+
+    def _start_doll(self) -> None:
+        self._stop_doll()   # clean up any leftover controller first
+
+        # Read settings from the bot settings page if it's already open.
+        settings: dict = {"target": "self", "heal_skill": "P1-F5", "heal_table": []}
+        if self._settings is not None:
+            bot_page = self._settings.pages.get("bot")
+            if bot_page is not None:
+                cfg = getattr(bot_page, "cfg", {})
+                grp = cfg.get("doll_target")
+                if grp is not None and grp.checkedButton() is not None:
+                    settings["target"] = grp.checkedButton().property("value") or "self"
+                hk = cfg.get("doll_heal_skill")
+                if hk is not None:
+                    settings["heal_skill"] = hk.value()
+                tbl = cfg.get("doll_heal_table")
+                if tbl is not None:
+                    settings["heal_table"] = tbl.value()
+
+        client = self._get_board_client()
+        ctrl = DollHealController(client, settings, parent=self)
+        ctrl.healed.connect(self._on_doll_healed)
+        self.monitor.hp_changed.connect(ctrl.on_hp)
+        self._doll_ctrl = ctrl
+
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        target_label = "自己" if settings["target"] == "self" else "別人（未實作）"
+        self.log.appendPlainText(
+            f"[{ts}] 🧘 娃娃補血啟動 — 補{target_label} / "
+            f"技能 {settings['heal_skill']} / "
+            f"{len(settings['heal_table'])} 條件"
+        )
+
+    def _stop_doll(self) -> None:
+        if self._doll_ctrl is None:
+            return
+        try:
+            self.monitor.hp_changed.disconnect(self._doll_ctrl.on_hp)
+        except RuntimeError:
+            pass
+        self._doll_ctrl.deleteLater()
+        self._doll_ctrl = None
+
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log.appendPlainText(f"[{ts}] 🧘 娃娃補血停止")
+
+    @QtCore.Slot(str)
+    def _on_doll_healed(self, skill_str: str) -> None:
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log.appendPlainText(f"[{ts}] 💊 補血 ({skill_str})")
 
     def _active_toggle(self) -> str | None:
         return self._activation_order[-1] if self._activation_order else None
