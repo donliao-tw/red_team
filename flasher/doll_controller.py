@@ -88,7 +88,7 @@ class DollHealController(QtCore.QObject):
                     jitter_sleep(0.4, spread=0.10)
                 # Double-tap slot key — Lineage targets self on second press
                 self._client.key_tap(slot_key)
-                jitter_sleep(0.12, spread=0.10)
+                jitter_sleep(0.20, spread=0.08)
                 self._client.key_tap(slot_key)
         skill_str = (f"{page_key.upper()}+" if page_key else "") + f"{slot_key.upper()}×{count*2}"
         self.healed.emit(skill_str)
