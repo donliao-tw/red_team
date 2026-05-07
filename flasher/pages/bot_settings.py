@@ -111,6 +111,109 @@ class ShopItemListEditor(QtWidgets.QWidget):
                 elif len(entry) >= 2:
                     self._add_row(True, str(entry[0]), str(entry[1]))
 
+DEFAULT_HEAL_TABLE = [
+    (70,  5),
+    (50, 15),
+    (40, 30),
+    (30, 70),
+    (25, 100),
+]
+
+
+class HealTableEditor(QtWidgets.QWidget):
+    """Editable list of (hp_threshold%, heal_probability%) conditions.
+
+    Row layout:  血量 < [SpinBox]%  →  [SpinBox]% 機率補血  [×]
+    Rows are evaluated top-to-bottom at runtime; the first matching
+    threshold triggers the heal roll.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(4)
+
+        self._rows_container = QtWidgets.QWidget()
+        self._rows_layout = QtWidgets.QVBoxLayout(self._rows_container)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(4)
+        v.addWidget(self._rows_container)
+
+        add_row = QtWidgets.QHBoxLayout()
+        add_row.setContentsMargins(0, 4, 0, 0)
+        add_btn = QtWidgets.QPushButton("＋ 新增條件")
+        add_btn.setObjectName("shopAdd")
+        add_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        add_btn.clicked.connect(lambda: self._add_row(50, 10))
+        add_row.addWidget(add_btn)
+        add_row.addStretch(1)
+        v.addLayout(add_row)
+
+        for hp, prob in DEFAULT_HEAL_TABLE:
+            self._add_row(hp, prob)
+
+    def _add_row(self, hp: int, prob: int) -> None:
+        row = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+
+        h.addWidget(QtWidgets.QLabel("血量 <"))
+
+        hp_spin = QtWidgets.QSpinBox()
+        hp_spin.setRange(1, 100)
+        hp_spin.setValue(hp)
+        hp_spin.setSuffix(" %")
+        hp_spin.setFixedWidth(72)
+        h.addWidget(hp_spin)
+
+        h.addWidget(QtWidgets.QLabel("→"))
+
+        prob_spin = QtWidgets.QSpinBox()
+        prob_spin.setRange(0, 100)
+        prob_spin.setValue(prob)
+        prob_spin.setSuffix(" %")
+        prob_spin.setFixedWidth(72)
+        h.addWidget(prob_spin)
+
+        h.addWidget(QtWidgets.QLabel("機率補血"))
+        h.addStretch(1)
+
+        del_btn = QtWidgets.QPushButton("×")
+        del_btn.setObjectName("shopDel")
+        del_btn.setFixedSize(28, 28)
+        del_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        del_btn.clicked.connect(lambda: self._remove_row(row))
+        h.addWidget(del_btn)
+
+        self._rows_layout.addWidget(row)
+
+    def _remove_row(self, row: QtWidgets.QWidget) -> None:
+        self._rows_layout.removeWidget(row)
+        row.deleteLater()
+
+    def value(self) -> list[tuple[int, int]]:
+        out = []
+        for i in range(self._rows_layout.count()):
+            row = self._rows_layout.itemAt(i).widget()
+            if row is None:
+                continue
+            spins = row.findChildren(QtWidgets.QSpinBox)
+            if len(spins) >= 2:
+                out.append((spins[0].value(), spins[1].value()))
+        return out
+
+    def set_value(self, data) -> None:
+        while self._rows_layout.count():
+            row = self._rows_layout.takeAt(0).widget()
+            if row is not None:
+                row.deleteLater()
+        for entry in (data or []):
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                self._add_row(int(entry[0]), int(entry[1]))
+
+
 # Built-in shopping list. (display_name, default_qty). The bot
 # multiplies by quantity when typing the buy command via the
 # speak-scroll. Users can disable individual rows.
@@ -206,10 +309,50 @@ class BotSettingsPage(Page):
         )
 
     def _build_doll_tab(self) -> QtWidgets.QWidget:
-        return self._placeholder_tab(
-            "娃娃功能設定",
-            "輔助治療角色（娃娃）跟團行為，例如自動補血/補魔範圍與優先順序。",
-        )
+        wrap = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(wrap)
+        outer.setContentsMargins(0, 8, 0, 0)
+        outer.setSpacing(12)
+
+        # ── 補血目標 ──────────────────────────────────────────────
+        card, layout = widgets.make_card("補血目標")
+        row, h = self._row()
+        rb_self  = widgets.radio("補自己",  value="self")
+        rb_other = widgets.radio("補別人", checked=True, value="other")
+        grp = QtWidgets.QButtonGroup(card)
+        grp.addButton(rb_self)
+        grp.addButton(rb_other)
+        self.cfg["doll_target"] = grp
+        h.addWidget(rb_self)
+        h.addSpacing(20)
+        h.addWidget(rb_other)
+        h.addStretch(1)
+        layout.addWidget(row)
+        outer.addWidget(card)
+
+        # ── 補血技能 ──────────────────────────────────────────────
+        card2, layout2 = widgets.make_card("補血技能")
+        row2, h2 = self._row()
+        h2.addWidget(widgets.label("技能位置:"))
+        hk = widgets.HotkeyMenu("P1-F5", paged=True)
+        self.cfg["doll_heal_skill"] = hk
+        h2.addWidget(hk)
+        h2.addStretch(1)
+        layout2.addWidget(row2)
+        outer.addWidget(card2)
+
+        # ── 補血條件 ──────────────────────────────────────────────
+        card3, layout3 = widgets.make_card("補血條件", expand=True)
+        layout3.addWidget(widgets.hint(
+            "由上至下掃描，符合第一個血量門檻時以對應機率決定是否補血。"
+            "機率 100% = 只要低於該血量必補。"
+        ))
+        tbl = HealTableEditor()
+        self.cfg["doll_heal_table"] = tbl
+        layout3.addWidget(tbl, stretch=1)
+        outer.addWidget(card3, stretch=1)
+
+        return wrap
 
     # ────────────────────────────── shop tab ──────────────────────────────
 
