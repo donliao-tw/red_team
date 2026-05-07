@@ -779,8 +779,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _start_doll(self) -> None:
         self._stop_doll()   # clean up any leftover controller first
 
-        # Read settings from the bot settings page if it's already open.
-        settings: dict = {"heal_skill": "P1-F5", "heal_table": []}
+        from pages.bot_settings import DEFAULT_HEAL_TABLE
+        settings: dict = {
+            "heal_skill": "P1-F6",
+            "heal_table": list(DEFAULT_HEAL_TABLE),
+        }
         if self._settings is not None:
             bot_page = self._settings.pages.get("bot")
             if bot_page is not None:
@@ -790,7 +793,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     settings["heal_skill"] = hk.value()
                 tbl = cfg.get("doll_heal_table")
                 if tbl is not None:
-                    settings["heal_table"] = tbl.value()
+                    loaded = tbl.value()
+                    if loaded:   # don't clobber default with empty list
+                        settings["heal_table"] = loaded
 
         client = self._get_board_client()
         ctrl = DollHealController(client, settings, parent=self)
