@@ -4,8 +4,8 @@ Watches the HP signal from GameMonitor and fires the configured heal
 skill via the Arduino HID when the HP% crosses a threshold with the
 configured probability.
 
-Self-heal sequence: switch page (F1/F2/F3) → press slot key twice.
-Pressing the skill twice in Lineage targets the caster themselves.
+Page-switch (F1/F2/F3) is pressed ONCE when the controller starts.
+Each heal fires the slot key twice (double-tap = self-target in Lineage).
 """
 from __future__ import annotations
 
@@ -34,11 +34,13 @@ class DollHealController(QtCore.QObject):
         """
         super().__init__(parent)
         self._client  = client
-        self._skill   = settings.get("heal_skill", "P1-F5")
+        self._skill   = settings.get("heal_skill", "P1-F6")
         raw_table     = settings.get("heal_table", [])
-        # Sort descending by HP threshold so we can stop at first match
         self._table   = sorted(raw_table, key=lambda x: -x[0])
         self._last_fire: float = 0.0
+        self._page_key, self._slot_key = self._parse_skill(self._skill)
+        # Switch to the correct skill page once at startup
+        self._switch_page()
 
     # ── public slot ─────────────────────────────────────────────────
 
@@ -75,22 +77,24 @@ class DollHealController(QtCore.QObject):
 
     # ── internals ────────────────────────────────────────────────────
 
+    def _switch_page(self) -> None:
+        if self._page_key and self._client is not None:
+            from board_client import jitter_sleep
+            self._client.key_tap(self._page_key)
+            jitter_sleep(0.3, spread=0.10)
+
     def _fire(self, count: int = 1) -> None:
         self._last_fire = time.monotonic()
-        page_key, slot_key = self._parse_skill(self._skill)
         if self._client is not None:
             from board_client import jitter_sleep
-            if page_key:
-                self._client.key_tap(page_key)
-                jitter_sleep(0.15, spread=0.10)
             for i in range(count):
                 if i > 0:
                     jitter_sleep(0.4, spread=0.10)
                 # Double-tap slot key — Lineage targets self on second press
-                self._client.key_tap(slot_key)
+                self._client.key_tap(self._slot_key)
                 jitter_sleep(0.20, spread=0.08)
-                self._client.key_tap(slot_key)
-        skill_str = (f"{page_key.upper()}+" if page_key else "") + f"{slot_key.upper()}×{count*2}"
+                self._client.key_tap(self._slot_key)
+        skill_str = f"{self._slot_key.upper()}×{count*2}"
         self.healed.emit(skill_str)
 
     @staticmethod

@@ -812,11 +812,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._doll_ctrl = ctrl
 
             page_k, slot_k = DollHealController._parse_skill(settings["heal_skill"])
-            key_seq = (f"{page_k.upper()}→" if page_k else "") + f"{slot_k.upper()}×2"
+            page_note = f"切頁 {page_k.upper()} → " if page_k else ""
             ts = datetime.now().strftime("%H:%M:%S")
             self.log.appendPlainText(
                 f"[{ts}] 🧘 娃娃補血啟動 — "
-                f"設定={settings['heal_skill']}  按鍵={key_seq} / "
+                f"{page_note}{slot_k.upper()}×2 / "
                 f"{len(settings['heal_table'])} 條件"
             )
             self.lbl_doll_active.show()
