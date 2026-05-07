@@ -40,7 +40,7 @@ def main() -> int:
 
     print(f"  → {SLOT_KEY.upper()} (第一下)")
     client.key_tap(SLOT_KEY)
-    jitter_sleep(0.20)
+    jitter_sleep(0.30)
 
     print(f"  → {SLOT_KEY.upper()} (第二下)")
     client.key_tap(SLOT_KEY)

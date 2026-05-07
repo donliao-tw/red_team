@@ -88,7 +88,7 @@ class DollHealController(QtCore.QObject):
                 if i > 0:
                     jitter_sleep(0.4, spread=0.10)
                 self._client.key_tap(self._slot_key)
-                jitter_sleep(0.20, spread=0.08)
+                jitter_sleep(0.30, spread=0.08)
                 self._client.key_tap(self._slot_key)
         skill_str = f"{self._slot_key.upper()}×{count*2}"
         self.healed.emit(skill_str)
