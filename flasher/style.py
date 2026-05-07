@@ -507,6 +507,23 @@ QLineEdit {{
 }}
 QLineEdit:focus {{ border: 1px solid {c['accent']}; }}
 
+QSpinBox {{
+    background-color: {c['bg_input']};
+    border: 1px solid {c['border']};
+    border-radius: 4px;
+    padding: 2px 4px;
+    color: {c['text_primary']};
+    font-size: {10 + d}pt;
+}}
+QSpinBox:focus {{ border: 1px solid {c['accent']}; }}
+QSpinBox::up-button, QSpinBox::down-button {{
+    width: 14px;
+    border: none;
+    background: {c['bg_subpanel']};
+}}
+QSpinBox::up-arrow   {{ width: 7px; height: 4px; image: url({ARROW_DOWN_PNG}); }}
+QSpinBox::down-arrow {{ width: 7px; height: 4px; image: url({ARROW_DOWN_PNG}); }}
+
 QPlainTextEdit, QTextEdit {{
     background-color: {c['bg_input']};
     border: 1px solid {c['border']};
