@@ -405,6 +405,16 @@ QPushButton#shopAdd:hover {{
     border-style: solid;
 }}
 
+QLabel#dollActiveBadge {{
+    color: #55dd88;
+    font-size: {9 + d}pt;
+    font-weight: 600;
+    padding: 2px 6px;
+    border: 1px solid #2a7a4a;
+    border-radius: 4px;
+    background: rgba(42, 122, 74, 0.18);
+}}
+
 /* ── Flow runner (main panel compact row) ── */
 
 /* Small circular play/stop toggle */

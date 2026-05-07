@@ -613,6 +613,12 @@ class MainWindow(QtWidgets.QMainWindow):
         h.addWidget(self.lbl_lawful, stretch=3)
         h.addWidget(self.lbl_time,   stretch=2)
 
+        # Doll-active indicator — hidden until 🧘 toggle is on.
+        self.lbl_doll_active = QtWidgets.QLabel("🧘 補血中")
+        self.lbl_doll_active.setObjectName("dollActiveBadge")
+        self.lbl_doll_active.hide()
+        h.addWidget(self.lbl_doll_active, stretch=3)
+
         # Status info button — hover to see the de-prioritised fields.
         self.status_info_btn = QtWidgets.QPushButton("ⓘ")  # ⓘ
         self.status_info_btn.setObjectName("statusInfo")
@@ -777,42 +783,49 @@ class MainWindow(QtWidgets.QMainWindow):
         return None
 
     def _start_doll(self) -> None:
-        self._stop_doll()   # clean up any leftover controller first
-
-        from pages.bot_settings import DEFAULT_HEAL_TABLE
-        settings: dict = {
-            "heal_skill": "P1-F6",
-            "heal_table": list(DEFAULT_HEAL_TABLE),
-        }
-        if self._settings is not None:
-            bot_page = self._settings.pages.get("bot")
-            if bot_page is not None:
-                cfg = getattr(bot_page, "cfg", {})
-                hk = cfg.get("doll_heal_skill")
-                if hk is not None:
-                    settings["heal_skill"] = hk.value()
-                tbl = cfg.get("doll_heal_table")
-                if tbl is not None:
-                    loaded = tbl.value()
-                    if loaded:   # don't clobber default with empty list
-                        settings["heal_table"] = loaded
-
-        client = self._get_board_client()
-        ctrl = DollHealController(client, settings, parent=self)
-        ctrl.healed.connect(self._on_doll_healed)
-        self.monitor.hp_changed.connect(ctrl.on_hp)
-        self._doll_ctrl = ctrl
-
+        self._stop_doll()
         from datetime import datetime
-        from doll_controller import DollHealController
-        page_k, slot_k = DollHealController._parse_skill(settings["heal_skill"])
-        key_seq = (f"{page_k.upper()}→" if page_k else "") + f"{slot_k.upper()}×2"
-        ts = datetime.now().strftime("%H:%M:%S")
-        self.log.appendPlainText(
-            f"[{ts}] 🧘 娃娃補血啟動 — "
-            f"設定={settings['heal_skill']}  按鍵={key_seq} / "
-            f"{len(settings['heal_table'])} 條件"
-        )
+
+        try:
+            from pages.bot_settings import DEFAULT_HEAL_TABLE
+            settings: dict = {
+                "heal_skill": "P1-F6",
+                "heal_table": list(DEFAULT_HEAL_TABLE),
+            }
+            if self._settings is not None:
+                bot_page = self._settings.pages.get("bot")
+                if bot_page is not None:
+                    cfg = getattr(bot_page, "cfg", {})
+                    hk = cfg.get("doll_heal_skill")
+                    if hk is not None:
+                        settings["heal_skill"] = hk.value()
+                    tbl = cfg.get("doll_heal_table")
+                    if tbl is not None:
+                        loaded = tbl.value()
+                        if loaded:
+                            settings["heal_table"] = loaded
+
+            client = self._get_board_client()
+            ctrl = DollHealController(client, settings, parent=self)
+            ctrl.healed.connect(self._on_doll_healed)
+            self.monitor.hp_changed.connect(ctrl.on_hp)
+            self._doll_ctrl = ctrl
+
+            page_k, slot_k = DollHealController._parse_skill(settings["heal_skill"])
+            key_seq = (f"{page_k.upper()}→" if page_k else "") + f"{slot_k.upper()}×2"
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.log.appendPlainText(
+                f"[{ts}] 🧘 娃娃補血啟動 — "
+                f"設定={settings['heal_skill']}  按鍵={key_seq} / "
+                f"{len(settings['heal_table'])} 條件"
+            )
+            self.lbl_doll_active.show()
+
+        except Exception as exc:
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.log.appendPlainText(f"[{ts}] ❌ 娃娃補血啟動失敗: {exc}")
+            import traceback
+            self.log.appendPlainText(traceback.format_exc())
 
     def _stop_doll(self) -> None:
         if self._doll_ctrl is None:
@@ -823,6 +836,7 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         self._doll_ctrl.deleteLater()
         self._doll_ctrl = None
+        self.lbl_doll_active.hide()
 
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M:%S")
