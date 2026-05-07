@@ -521,7 +521,7 @@ QSpinBox::up-button, QSpinBox::down-button {{
     border: none;
     background: {c['bg_subpanel']};
 }}
-QSpinBox::up-arrow   {{ width: 7px; height: 4px; image: url({ARROW_DOWN_PNG}); }}
+QSpinBox::up-arrow   {{ width: 7px; height: 4px; }}
 QSpinBox::down-arrow {{ width: 7px; height: 4px; image: url({ARROW_DOWN_PNG}); }}
 
 QPlainTextEdit, QTextEdit {{
